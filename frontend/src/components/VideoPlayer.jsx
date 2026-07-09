@@ -35,8 +35,31 @@ function fmt(t) {
     : `${m}:${String(s).padStart(2, '0')}`;
 }
 
+// "HH:MM:SS.mmm" -> segundos.
+function vttTime(t) {
+  const [hh, mm, rest] = t.split(':');
+  const [ss, ms = '0'] = (rest || '0').split('.');
+  return (+hh) * 3600 + (+mm) * 60 + (+ss) + (+ms) / 1000;
+}
+
+// Parsea el WebVTT de miniaturas -> [{ start, end, x, y, w, h }].
+function parseThumbnailsVtt(text) {
+  const cues = [];
+  for (const block of text.trim().split(/\n\n+/)) {
+    const lines = block.split('\n');
+    const timeLine = lines.find((l) => l.includes('-->'));
+    if (!timeLine) continue;
+    const urlLine = lines[lines.indexOf(timeLine) + 1] || '';
+    const xywh = urlLine.match(/#xywh=(\d+),(\d+),(\d+),(\d+)/);
+    if (!xywh) continue;
+    const [s, e] = timeLine.split('-->').map((x) => vttTime(x.trim()));
+    cues.push({ start: s, end: e, x: +xywh[1], y: +xywh[2], w: +xywh[3], h: +xywh[4] });
+  }
+  return cues;
+}
+
 export default function VideoPlayer({
-  hlsUrl, progressiveUrl, mediaId, episodeId = null, title, restart = false,
+  hlsUrl, progressiveUrl, thumbnailsUrl, mediaId, episodeId = null, title, restart = false,
   nextItem = null, recommendations = [], onNavigate, onBack,
 }) {
   const videoRef = useRef(null);
@@ -45,6 +68,26 @@ export default function VideoPlayer({
   const hlsRef = useRef(null);       // instancia de hls.js
   const [showEndScreen, setShowEndScreen] = useState(false);
   const [buffering, setBuffering] = useState(true); // mostrando icono de carga
+
+  // Miniaturas del preview de la barra (sprite + cues del WebVTT).
+  const [cues, setCues] = useState([]);
+  const [spriteUrl, setSpriteUrl] = useState(null);
+  const [preview, setPreview] = useState({ visible: false, x: 0, time: 0 });
+
+  useEffect(() => {
+    setCues([]); setSpriteUrl(null);
+    if (!thumbnailsUrl) return;
+    let cancelled = false;
+    fetch(thumbnailsUrl, { credentials: 'include' })
+      .then((r) => (r.ok ? r.text() : Promise.reject()))
+      .then((text) => {
+        if (cancelled) return;
+        setCues(parseThumbnailsVtt(text));
+        setSpriteUrl(thumbnailsUrl.replace('thumbnails.vtt', 'thumbnails.jpg'));
+      })
+      .catch(() => { /* sin miniaturas: no pasa nada */ });
+    return () => { cancelled = true; };
+  }, [thumbnailsUrl]);
 
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -350,19 +393,53 @@ export default function VideoPlayer({
       {/* -------- Barra de controles inferior -------- */}
       {showControls && (
         <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/80 to-transparent px-4 pb-4 pt-10">
-          {/* Barra de progreso (seekable) */}
-          <input
-            type="range"
-            min={0}
-            max={duration || 0}
-            step="0.1"
-            value={current}
-            onChange={(e) => seekTo(Number(e.target.value))}
-            className="mb-2 h-1.5 w-full cursor-pointer appearance-none rounded-full bg-gray-600 accent-brand"
-            style={{
-              background: `linear-gradient(to right, #e50914 ${progressPct}%, #4b5563 ${progressPct}%)`,
+          {/* Barra de progreso (seekable) con preview de miniaturas */}
+          <div
+            className="relative mb-2"
+            onMouseMove={(e) => {
+              if (!cues.length || !duration || !spriteUrl) return;
+              const rect = e.currentTarget.getBoundingClientRect();
+              const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+              setPreview({ visible: true, x: ratio * rect.width, time: ratio * duration });
             }}
-          />
+            onMouseLeave={() => setPreview((p) => ({ ...p, visible: false }))}
+          >
+            {/* Miniatura flotante en el punto donde está el cursor */}
+            {preview.visible && spriteUrl && (() => {
+              const cue = cues.find((c) => preview.time >= c.start && preview.time < c.end) || cues[cues.length - 1];
+              if (!cue) return null;
+              // Clamp horizontal para que la miniatura no se salga del contenedor.
+              const half = cue.w / 2;
+              const left = Math.min(Math.max(preview.x, half), (containerRef.current?.clientWidth || 9999) - half);
+              return (
+                <div className="pointer-events-none absolute bottom-5 -translate-x-1/2" style={{ left }}>
+                  <div
+                    className="rounded border border-white/40 shadow-lg"
+                    style={{
+                      width: cue.w, height: cue.h,
+                      backgroundImage: `url(${spriteUrl})`,
+                      backgroundPosition: `-${cue.x}px -${cue.y}px`,
+                      backgroundRepeat: 'no-repeat',
+                    }}
+                  />
+                  <div className="mt-0.5 text-center text-xs font-medium text-white drop-shadow">{fmt(preview.time)}</div>
+                </div>
+              );
+            })()}
+
+            <input
+              type="range"
+              min={0}
+              max={duration || 0}
+              step="0.1"
+              value={current}
+              onChange={(e) => seekTo(Number(e.target.value))}
+              className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-gray-600 accent-brand"
+              style={{
+                background: `linear-gradient(to right, #e50914 ${progressPct}%, #4b5563 ${progressPct}%)`,
+              }}
+            />
+          </div>
 
           <div className="flex items-center gap-2 text-white sm:gap-4">
             {/* Play / pausa */}

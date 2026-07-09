@@ -15,7 +15,7 @@ import adminRouter    from './routes/admin.js';
 import authRouter     from './routes/auth.js';
 import { requireAuth, requireAdmin } from './middleware/auth.js';
 import { seedAdmin } from './seedAdmin.js';
-import { resumePendingTranscodes, HLS_ROOT } from './transcoder.js';
+import { resumePendingTranscodes, backfillThumbnails, HLS_ROOT } from './transcoder.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 4000;
@@ -95,5 +95,7 @@ seedAdmin()
     server.keepAliveTimeout = 120000;
 
     // Reencola transcodificaciones pendientes (reinicios + contenido existente).
-    resumePendingTranscodes().catch((e) => console.error('[transcoder] resume:', e));
+    resumePendingTranscodes()
+      .then(() => backfillThumbnails())   // genera miniaturas faltantes
+      .catch((e) => console.error('[transcoder] resume:', e));
   });

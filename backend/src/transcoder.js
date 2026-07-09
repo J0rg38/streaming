@@ -118,6 +118,46 @@ async function transcodeRendition(input, outDir, r, srcW, srcH, onProgress) {
   return { ...r, width: width || Math.round((r.height * 16) / 9) };
 }
 
+// --- Genera un "sprite" de miniaturas + un WebVTT que mapea cada instante
+//     del video a su miniatura (como el preview al deslizar en Netflix). -----
+async function generateThumbnails(input, outDir, duration) {
+  if (!duration || duration < 2) return;
+
+  const cols = 10;            // miniaturas por fila en el sprite
+  const thumbW = 160, thumbH = 90;
+  // Intervalo entre miniaturas: apuntamos a ~150 como máximo.
+  const interval = Math.max(2, Math.ceil(duration / 150));
+  const count = Math.max(1, Math.ceil(duration / interval));
+  const rows = Math.ceil(count / cols);
+
+  const spritePath = path.join(outDir, 'thumbnails.jpg');
+  // Un frame cada `interval` s, escalado, y todo unido en una rejilla cols x rows.
+  await runFfmpeg([
+    '-y', '-i', input,
+    '-vf', `fps=1/${interval},scale=${thumbW}:${thumbH},tile=${cols}x${rows}`,
+    '-frames:v', '1', '-qscale:v', '4',
+    spritePath,
+  ]);
+
+  // Construimos el WebVTT: cada cue apunta a una región del sprite (#xywh).
+  const fmt = (t) => {
+    const h = Math.floor(t / 3600);
+    const m = Math.floor((t % 3600) / 60);
+    const s = Math.floor(t % 60);
+    const ms = Math.floor((t - Math.floor(t)) * 1000);
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+  };
+  let vtt = 'WEBVTT\n\n';
+  for (let i = 0; i < count; i++) {
+    const start = i * interval;
+    const end = Math.min(duration, (i + 1) * interval);
+    const x = (i % cols) * thumbW;
+    const y = Math.floor(i / cols) * thumbH;
+    vtt += `${fmt(start)} --> ${fmt(end)}\nthumbnails.jpg#xywh=${x},${y},${thumbW},${thumbH}\n\n`;
+  }
+  fs.writeFileSync(path.join(outDir, 'thumbnails.vtt'), vtt);
+}
+
 // --- Escribe el master playlist que agrupa todas las renditions. ------------
 function writeMasterPlaylist(outDir, results) {
   let m = '#EXTM3U\n#EXT-X-VERSION:3\n';
@@ -147,6 +187,21 @@ async function processItem(item) {
   const table = item.kind === 'movie' ? 'media' : 'episodes';
   const key = `${item.kind}-${item.id}`;
   const outDir = path.join(HLS_ROOT, key);
+
+  // --- Modo "sólo miniaturas": para contenido ya transcodificado que aún no
+  //     tiene su sprite (backfill). No toca el estado ni re-transcodifica. ---
+  if (item.thumbsOnly) {
+    try {
+      if (!fs.existsSync(item.videoPath)) return;
+      const { duration } = await probeVideo(item.videoPath);
+      fs.mkdirSync(outDir, { recursive: true });
+      await generateThumbnails(item.videoPath, outDir, duration || item.duration);
+      console.log(`[transcoder] miniaturas ${key} — listas`);
+    } catch (err) {
+      console.error(`[transcoder] miniaturas ${key} — error:`, err.message);
+    }
+    return;
+  }
 
   console.log(`[transcoder] > ${key} — iniciando`);
   await query(`UPDATE ${table} SET transcode_status = 'processing' WHERE id = $1`, [item.id]);
@@ -179,6 +234,10 @@ async function processItem(item) {
     }
 
     writeMasterPlaylist(outDir, results);
+
+    // Miniaturas para el preview de la barra (no bloquea si falla).
+    try { await generateThumbnails(item.videoPath, outDir, duration); }
+    catch (e) { console.error(`[transcoder] miniaturas ${key}:`, e.message); }
 
     const masterUrl = `/api/hls/${key}/master.m3u8`;
     await query(
@@ -245,6 +304,35 @@ export async function resumePendingTranscodes() {
 
   const total = movies.length + eps.length;
   if (total > 0) console.log(`[transcoder] ${total} item(s) en cola para transcodificar.`);
+}
+
+// ===========================================================================
+//  Backfill de miniaturas: para contenido ya 'ready' que aún no tiene el
+//  sprite de previews (subido antes de esta función). Genera sólo miniaturas.
+// ===========================================================================
+export async function backfillThumbnails() {
+  const missing = (kind, key, videoPath, duration, id) => {
+    const vtt = path.join(HLS_ROOT, key, 'thumbnails.vtt');
+    if (videoPath && fs.existsSync(videoPath) && !fs.existsSync(vtt)) {
+      enqueueTranscode({ kind, id, videoPath, duration, thumbsOnly: true });
+      return true;
+    }
+    return false;
+  };
+
+  const { rows: movies } = await query(
+    `SELECT id, video_path, duration FROM media
+      WHERE type = 'movie' AND transcode_status = 'ready' AND video_path IS NOT NULL`
+  );
+  let n = 0;
+  for (const m of movies) if (missing('movie', `movie-${m.id}`, m.video_path, m.duration, m.id)) n++;
+
+  const { rows: eps } = await query(
+    `SELECT id, video_path, duration FROM episodes WHERE transcode_status = 'ready'`
+  );
+  for (const e of eps) if (missing('episode', `episode-${e.id}`, e.video_path, e.duration, e.id)) n++;
+
+  if (n > 0) console.log(`[transcoder] generando miniaturas para ${n} título(s) existentes.`);
 }
 
 export { HLS_ROOT };

@@ -30,7 +30,7 @@ export default function PlayerPage() {
     setLoading(true);
     Promise.all([fetchMedia(mediaId), fetchSimilar(mediaId).catch(() => [])])
       .then(([media, similar]) => {
-        let videoPath, hlsMaster, status;
+        let videoPath, hlsMaster, status, thumbnails;
         let next = null;
 
         if (epId) {
@@ -42,6 +42,7 @@ export default function PlayerPage() {
           videoPath = ep.video_path;
           hlsMaster = ep.hls_master;
           status = ep.transcode_status;
+          thumbnails = ep.thumbnails;
           setTitle(
             `${media.title} · T${ep.season_number}:E${ep.episode_number}` +
             (ep.title ? ` — ${ep.title}` : '')
@@ -65,6 +66,7 @@ export default function PlayerPage() {
           videoPath = media.video_path;
           hlsMaster = media.hls_master;
           status = media.transcode_status;
+          thumbnails = media.thumbnails;
           setTitle(media.title);
         }
 
@@ -89,6 +91,7 @@ export default function PlayerPage() {
         setSource({
           hlsUrl: status === 'ready' && hlsMaster ? hlsMaster : null,
           progressiveUrl: streamUrl(videoPath),
+          thumbnailsUrl: status === 'ready' ? thumbnails : null,
         });
       })
       .catch((e) => setError(e.message))
@@ -114,13 +117,17 @@ export default function PlayerPage() {
       <VideoPlayer
         hlsUrl={source?.hlsUrl}
         progressiveUrl={source?.progressiveUrl}
+        thumbnailsUrl={source?.thumbnailsUrl}
         mediaId={Number(mediaId)}
         episodeId={epId ? Number(epId) : null}
         title={title}
         restart={restart}
         nextItem={nextItem}
         recommendations={recommendations}
-        onNavigate={(path) => navigate(path)}
+        // replace: true -> al saltar al siguiente video NO apilamos historial,
+        // así el botón "Volver" siempre regresa a la página de origen (no al
+        // video anterior que se reprodujo automáticamente).
+        onNavigate={(path) => navigate(path, { replace: true })}
         onBack={() => navigate(-1)}
       />
     </div>

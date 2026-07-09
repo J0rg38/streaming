@@ -210,6 +210,9 @@ router.get('/:id', async (req, res) => {
 
     const media = rows[0];
 
+    // URL del WebVTT de miniaturas (derivada del master HLS).
+    const thumbsFromMaster = (m) => (m ? m.replace('master.m3u8', 'thumbnails.vtt') : null);
+
     if (media.type === 'movie') {
       // Adjuntamos el progreso del usuario para la película.
       const { rows: pr } = await query(
@@ -222,7 +225,7 @@ router.get('/:id', async (req, res) => {
         duration: media.duration,
         episode: null,
       });
-      return res.json({ ...media, progress });
+      return res.json({ ...media, thumbnails: thumbsFromMaster(media.hls_master), progress });
     }
 
     // --- Serie: capítulos ordenados, cada uno con el progreso del usuario --
@@ -246,6 +249,7 @@ router.get('/:id', async (req, res) => {
         duration: ep.duration,
         episode: null,
       });
+      ep.thumbnails = thumbsFromMaster(ep.hls_master);
       if (!seasonMap.has(ep.season_number)) seasonMap.set(ep.season_number, []);
       seasonMap.get(ep.season_number).push(ep);
     }
