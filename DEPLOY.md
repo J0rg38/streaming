@@ -252,22 +252,50 @@ server {
 }
 ```
 
-Permite que Nginx haga proxy al backend (SELinux lo bloquea por defecto en AlmaLinux):
+### ⚠️ SELinux (AlmaLinux) — imprescindible, evita el error 403
+
+AlmaLinux trae **SELinux en modo enforcing**. Hay que hacer DOS cosas:
+
+**a) Permitir el proxy al backend** (si no, da `502`):
 ```bash
 sudo setsebool -P httpd_can_network_connect 1
 ```
 
-Da permisos de lectura a Nginx sobre el frontend:
+**b) Etiquetar el frontend con el contexto correcto** (si no, Nginx no puede leer
+los archivos y devuelve **403 Forbidden**):
+```bash
+sudo dnf install -y policycoreutils-python-utils
+sudo semanage fcontext -a -t httpd_sys_content_t "/var/www/streaming/frontend/dist(/.*)?"
+sudo restorecon -Rv /var/www/streaming/frontend/dist
+```
+
+### Permisos de lectura para Nginx
 ```bash
 sudo chown -R nginx:nginx /var/www/streaming/frontend/dist
-# Si Nginx no puede entrar a /var/www/streaming, ajusta el recorrido:
+# Nginx (usuario 'nginx') debe poder ATRAVESAR todo el recorrido hasta dist:
 sudo chmod o+x /var/www /var/www/streaming /var/www/streaming/frontend
+sudo find /var/www/streaming/frontend/dist -type d -exec chmod 755 {} \;
+sudo find /var/www/streaming/frontend/dist -type f -exec chmod 644 {} \;
+```
+
+> Si clonaste el proyecto en el **home** de un usuario (p.ej. `/home/tuusuario/streaming`)
+> en lugar de `/var/www`, tendrás 403 casi seguro: Nginx no entra en `/home/*` por SELinux
+> ni por permisos. **Usa `/var/www/streaming`** como en esta guía, o mueve el proyecto ahí.
+
+### Verifica que el build existe
+```bash
+ls -la /var/www/streaming/frontend/dist   # debe haber index.html y la carpeta assets/
 ```
 
 Prueba y arranca Nginx:
 ```bash
 sudo nginx -t
 sudo systemctl enable --now nginx
+```
+
+Comprueba que responde TU sitio (y no el server por defecto de Nginx):
+```bash
+curl -I -H "Host: test.cisne.com.pe" http://127.0.0.1/    # debe dar 200 OK
 ```
 
 Ahora `http://test.cisne.com.pe` debería cargar la app (sin HTTPS todavía).
@@ -334,6 +362,7 @@ sudo chown -R nginx:nginx /var/www/streaming/frontend/dist
 
 | Síntoma | Causa / Solución |
 |---------|------------------|
+| **`403 Forbidden`** | SELinux o permisos sobre el frontend. Mira `sudo tail /var/log/nginx/error.log`: si dice `Permission denied` → falta el contexto SELinux (`semanage fcontext … httpd_sys_content_t` + `restorecon -Rv`) o los permisos de recorrido (`chmod o+x` en `/var/www`, `/var/www/streaming`, `/var/www/streaming/frontend`). Si dice `directory index … is forbidden` → falta `dist/index.html` (no corrió `npm run build`). Si clonaste en `/home/...`, muévelo a `/var/www/streaming`. |
 | `502 Bad Gateway` | El backend no está arriba (`pm2 status`) **o** falta `setsebool -P httpd_can_network_connect 1`. |
 | Login falla / "No autenticado" | `COOKIE_SECURE=true` requiere HTTPS. Asegúrate de entrar por `https://`. |
 | La subida se corta | Sube `client_max_body_size` y los `proxy_*_timeout` en Nginx (ya incluidos arriba). |

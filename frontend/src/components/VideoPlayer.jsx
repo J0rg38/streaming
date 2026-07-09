@@ -17,7 +17,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   Play, Pause, Volume2, VolumeX, Maximize,
-  RotateCcw, RotateCw, Settings, ArrowLeft,
+  RotateCcw, RotateCw, Settings, ArrowLeft, Loader2,
 } from 'lucide-react';
 // hls.js se carga de forma diferida (import dinámico) para no engordar el
 // bundle inicial: sólo se descarga cuando se abre el reproductor.
@@ -44,6 +44,7 @@ export default function VideoPlayer({
   const hideTimerRef = useRef(null); // temporizador para ocultar los controles
   const hlsRef = useRef(null);       // instancia de hls.js
   const [showEndScreen, setShowEndScreen] = useState(false);
+  const [buffering, setBuffering] = useState(true); // mostrando icono de carga
 
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -69,6 +70,11 @@ export default function VideoPlayer({
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
     setLevels([]);
     setShowEndScreen(false); // nuevo video -> ocultamos la pantalla de fin
+    setBuffering(true);      // mostramos el icono de carga hasta que pueda reproducir
+
+    // Intenta iniciar la reproducción automáticamente. Si el navegador la
+    // bloquea (política de autoplay), se queda en pausa y el usuario dará play.
+    const tryPlay = () => { v.play().catch(() => {}); };
 
     async function setup() {
       if (hlsUrl) {
@@ -87,6 +93,7 @@ export default function VideoPlayer({
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
             const lv = hls.levels.map((l, i) => ({ index: i, height: l.height, bitrate: l.bitrate }));
             setLevels(lv);
+            tryPlay(); // <-- arranque automático (el atributo autoplay no basta con hls.js)
           });
           hls.on(Hls.Events.LEVEL_SWITCHED, (_e, data) => setAutoLevel(data.level));
           hlsRef.current = hls;
@@ -94,11 +101,13 @@ export default function VideoPlayer({
         }
         if (v.canPlayType('application/vnd.apple.mpegurl')) {
           v.src = hlsUrl; // Safari: HLS nativo
+          v.addEventListener('loadedmetadata', tryPlay, { once: true });
           return;
         }
       }
       // Respaldo: MP4 progresivo por rangos HTTP (mientras se transcodifica).
       v.src = progressiveUrl;
+      v.addEventListener('loadedmetadata', tryPlay, { once: true });
     }
     setup();
 
@@ -306,8 +315,20 @@ export default function VideoPlayer({
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={handleEnded}
+        onWaiting={() => setBuffering(true)}    // el video espera datos (buffering)
+        onSeeking={() => setBuffering(true)}
+        onCanPlay={() => setBuffering(false)}
+        onPlaying={() => setBuffering(false)}
+        onSeeked={() => setBuffering(false)}
         autoPlay
       />
+
+      {/* Icono de carga (buffering / carga inicial) */}
+      {buffering && !showEndScreen && (
+        <div className="pointer-events-none absolute inset-0 grid place-items-center">
+          <Loader2 size={56} className="animate-spin text-white/90 drop-shadow-lg" />
+        </div>
+      )}
 
       {/* Barra superior: botón volver + título (mismo patrón que Netflix) */}
       {showControls && (
