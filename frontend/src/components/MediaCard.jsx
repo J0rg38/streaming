@@ -1,0 +1,75 @@
+// ----------------------------------------------------------------------------
+//  MediaCard.jsx — Tarjeta de un título dentro de un carrusel.
+//
+//  DIFERENCIACIÓN de contenido:
+//    - type === 'movie'  -> clic abre la vista de detalle (/movie/:id).
+//    - type === 'series' -> clic abre la vista de detalle (/series/:id).
+//
+//  Indicadores visuales (item.progress viene del backend, por usuario):
+//    - Barra inferior con el porcentaje ya visto.
+//    - Etiqueta: "Te quedan 45min" / "Visto" / duración total si no se ha visto.
+//    - En series, si hay progreso, muestra el capítulo en curso (T1:E3).
+// ----------------------------------------------------------------------------
+import { useNavigate } from 'react-router-dom';
+import { Play, ListVideo, Clock } from 'lucide-react';
+import { progressLabel } from '../utils/format.js';
+
+export default function MediaCard({ item }) {
+  const navigate = useNavigate();
+  const isSeries = item.type === 'series';
+  const p = item.progress; // null si el usuario no ha visto nada
+
+  const handleClick = () => {
+    if (isSeries) navigate(`/series/${item.id}`);
+    else navigate(`/movie/${item.id}`);
+  };
+
+  // Etiqueta de tiempo: restante si hay progreso, duración total si no.
+  const timeLabel = progressLabel(p, item.duration);
+  const percent = p?.percent ?? 0;
+
+  return (
+    <div
+      onClick={handleClick}
+      className="group relative w-28 flex-shrink-0 cursor-pointer transition-transform duration-200 hover:scale-105 sm:w-36 md:w-40"
+    >
+      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-md shadow-lg">
+        <img src={item.poster_url} alt={item.title} className="h-full w-full object-cover" loading="lazy" />
+
+        {/* Overlay al pasar el ratón */}
+        <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/90 via-black/20 to-transparent p-2 opacity-0 transition-opacity group-hover:opacity-100">
+          <p className="truncate text-sm font-semibold">{item.title}</p>
+          <div className="mt-1 flex items-center gap-1 text-xs text-gray-300">
+            {isSeries ? <><ListVideo size={14} /> Serie</> : <><Play size={14} /> Película</>}
+          </div>
+        </div>
+
+        {/* Etiqueta de tipo */}
+        <span className="absolute left-2 top-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+          {isSeries ? 'Serie' : 'Película'}
+        </span>
+
+        {/* Barra de progreso ya visto (parte inferior de la imagen) */}
+        {percent > 0 && (
+          <div className="absolute bottom-0 left-0 h-1 w-full bg-black/50">
+            <div className="h-full bg-brand" style={{ width: `${percent}%` }} />
+          </div>
+        )}
+      </div>
+
+      {/* Etiqueta de tiempo bajo la tarjeta */}
+      {timeLabel && (
+        <div className="mt-1 flex items-center gap-1 text-[11px] text-gray-400">
+          <Clock size={11} />
+          <span className={p && p.percent >= 95 ? 'text-green-400' : ''}>{timeLabel}</span>
+          {/* En series con progreso, indicamos el capítulo en curso */}
+          {isSeries && p?.episode && (
+            <span className="text-gray-500">
+              · T{p.episode.season_number}:E{p.episode.episode_number}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
