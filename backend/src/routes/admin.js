@@ -118,9 +118,9 @@ router.post(
       const bannerUrl = imageUrl(req.files?.banner?.[0]) || posterUrl;
 
       const { rows } = await query(
-        `INSERT INTO media (title, description, type, release_year, genres, actors,
+        `INSERT INTO media (title, description, type, release_year, genres, actors, tags,
                             poster_url, banner_url, video_path, duration)
-         VALUES ($1, $2, 'movie', $3, $4, $5, $6, $7, $8, $9)
+         VALUES ($1, $2, 'movie', $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING id, title, type`,
         [
           title,
@@ -128,6 +128,7 @@ router.post(
           release_year ? Number(release_year) : null,
           parseGenres(req.body.genres),
           parseGenres(req.body.actors), // misma lógica: separados por coma
+          parseGenres(req.body.tags),
           posterUrl,
           bannerUrl,
           videoFile.path, // ruta absoluta dentro de MEDIA_ROOT
@@ -166,9 +167,9 @@ router.post(
       const bannerUrl = imageUrl(req.files?.banner?.[0]) || posterUrl;
 
       const { rows } = await query(
-        `INSERT INTO media (title, description, type, release_year, genres, actors,
+        `INSERT INTO media (title, description, type, release_year, genres, actors, tags,
                             poster_url, banner_url, video_path)
-         VALUES ($1, $2, 'series', $3, $4, $5, $6, $7, NULL)
+         VALUES ($1, $2, 'series', $3, $4, $5, $6, $7, $8, NULL)
          RETURNING id, title, type`,
         [
           title,
@@ -176,6 +177,7 @@ router.post(
           release_year ? Number(release_year) : null,
           parseGenres(req.body.genres),
           parseGenres(req.body.actors),
+          parseGenres(req.body.tags),
           posterUrl,
           bannerUrl,
         ]
@@ -298,7 +300,8 @@ router.get('/library', async (req, res) => {
       where.push(
         `(m.title ILIKE $${i}
           OR EXISTS (SELECT 1 FROM unnest(m.genres) g WHERE g ILIKE $${i})
-          OR EXISTS (SELECT 1 FROM unnest(m.actors) a WHERE a ILIKE $${i}))`
+          OR EXISTS (SELECT 1 FROM unnest(m.actors) a WHERE a ILIKE $${i})
+          OR EXISTS (SELECT 1 FROM unnest(m.tags)   t WHERE t ILIKE $${i}))`
       );
       params.push(like); i++;
     }
@@ -360,13 +363,65 @@ router.patch('/media/:id/featured', async (req, res) => {
 });
 
 // ===========================================================================
+//  PATCH /api/admin/media/:id — edita los datos de un título.
+//    Campos de texto: title, description, release_year, genres, actors, tags.
+//    Archivos opcionales: poster, banner (multipart). No cambia el video.
+// ===========================================================================
+router.patch(
+  '/media/:id',
+  imageUpload.fields([
+    { name: 'poster', maxCount: 1 },
+    { name: 'banner', maxCount: 1 },
+  ]),
+  async (req, res) => {
+    const id = Number(req.params.id);
+    try {
+      const b = req.body || {};
+      const sets = [];
+      const params = [];
+      let i = 1;
+
+      // Campos de texto (sólo se actualizan si vienen en el body).
+      if (b.title !== undefined)        { sets.push(`title = $${i++}`); params.push(b.title); }
+      if (b.description !== undefined)  { sets.push(`description = $${i++}`); params.push(b.description || null); }
+      if (b.release_year !== undefined) { sets.push(`release_year = $${i++}`); params.push(b.release_year ? Number(b.release_year) : null); }
+      if (b.genres !== undefined)       { sets.push(`genres = $${i++}`); params.push(parseGenres(b.genres)); }
+      if (b.actors !== undefined)       { sets.push(`actors = $${i++}`); params.push(parseGenres(b.actors)); }
+      if (b.tags !== undefined)         { sets.push(`tags = $${i++}`); params.push(parseGenres(b.tags)); }
+
+      // Imágenes nuevas (si se subieron).
+      const posterFile = req.files?.poster?.[0];
+      const bannerFile = req.files?.banner?.[0];
+      if (posterFile) { sets.push(`poster_url = $${i++}`); params.push(imageUrl(posterFile)); }
+      if (bannerFile) { sets.push(`banner_url = $${i++}`); params.push(imageUrl(bannerFile)); }
+
+      if (sets.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
+
+      params.push(id);
+      const { rows } = await query(
+        `UPDATE media SET ${sets.join(', ')} WHERE id = $${i}
+         RETURNING id, title, type`,
+        params
+      );
+      if (rows.length === 0) return res.status(404).json({ error: 'No encontrado' });
+      res.json(rows[0]);
+    } catch (err) {
+      console.error('[PATCH /api/admin/media/:id]', err);
+      res.status(500).json({ error: 'Error al editar el título' });
+    }
+  }
+);
+
+// ===========================================================================
 //  GET /api/admin/media/:id — detalle para gestión (serie con sus capítulos).
 // ===========================================================================
 router.get('/media/:id', async (req, res) => {
   const id = Number(req.params.id);
   try {
     const { rows } = await query(
-      `SELECT id, title, type FROM media WHERE id = $1`, [id]
+      `SELECT id, title, type, description, release_year, genres, actors, tags,
+              poster_url, banner_url
+         FROM media WHERE id = $1`, [id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'No encontrado' });
 

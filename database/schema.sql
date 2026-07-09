@@ -42,6 +42,7 @@ CREATE TABLE media (
     release_year INT,
     genres       TEXT[]       DEFAULT '{}',      -- p.ej. {'Acción','Drama'}
     actors       TEXT[]       NOT NULL DEFAULT '{}', -- reparto (para búsqueda)
+    tags         TEXT[]       NOT NULL DEFAULT '{}', -- etiquetas libres (alias, nombre en inglés…)
     poster_url   TEXT,                            -- imagen vertical (carrusel)
     banner_url   TEXT,                            -- imagen horizontal (hero)
     video_path   TEXT,                            -- SOLO se llena si type='movie'

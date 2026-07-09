@@ -105,6 +105,9 @@ export const setFeatured       = (id, featured) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ featured }),
   });
+// Edición de datos de un título (multipart: incluye poster/banner opcionales).
+export const updateMediaDetails = (id, formData) =>
+  apiFetch(`${BASE}/admin/media/${id}`, { method: 'PATCH', body: formData });
 export const deleteEpisode     = (id) => apiFetch(`${BASE}/admin/episodes/${id}`, { method: 'DELETE' });
 
 // Gestión de usuarios

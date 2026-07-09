@@ -17,7 +17,7 @@ import {
 import {
   uploadForm, fetchAdminSeries, fetchLibrary, fetchAdminMedia,
   deleteMedia, deleteEpisode, fetchUsers, deleteUser, updateUserRole,
-  createUser, updateUser, fetchTranscodeProgress, setFeatured,
+  createUser, updateUser, fetchTranscodeProgress, setFeatured, updateMediaDetails,
 } from '../api.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { formatMinutes } from '../utils/format.js';
@@ -144,6 +144,9 @@ function MovieForm({ onDone }) {
       <Field label="Actores / reparto (separados por coma)">
         <input name="actors" className={inputCls} placeholder="Matthew McConaughey, Anne Hathaway" />
       </Field>
+      <Field label="Etiquetas (nombre en inglés, alias, saga… separadas por coma)">
+        <input name="tags" className={inputCls} placeholder="Interstellar, espacio, Nolan" />
+      </Field>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Field label="Póster"><input name="poster" type="file" accept="image/*" className={inputCls} /></Field>
         <Field label="Banner"><input name="banner" type="file" accept="image/*" className={inputCls} /></Field>
@@ -182,6 +185,9 @@ function SeriesForm({ onCreated }) {
       </div>
       <Field label="Actores / reparto (separados por coma)">
         <input name="actors" className={inputCls} placeholder="Louis Hofmann, Lisa Vicari" />
+      </Field>
+      <Field label="Etiquetas (nombre en inglés, alias, saga… separadas por coma)">
+        <input name="tags" className={inputCls} placeholder="Dark, viaje en el tiempo" />
       </Field>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Póster"><input name="poster" type="file" accept="image/*" className={inputCls} /></Field>
@@ -429,8 +435,87 @@ function SeriesEpisodes({ seriesId, onChanged, progress = {}, reloadSignal = 0 }
   );
 }
 
+// ---------------------------------------------------------------------------
+//  Modal de edición de un título (película o serie).
+//  Precarga los datos actuales y permite cambiar textos, etiquetas e imágenes.
+// ---------------------------------------------------------------------------
+function MediaEditModal({ id, onClose, onSaved }) {
+  const [media, setMedia] = useState(null);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { fetchAdminMedia(id).then(setMedia).catch((e) => setError(e.message)); }, [id]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setSaving(true); setError('');
+    const fd = new FormData(e.target);
+    // Si no se elige imagen nueva, no la enviamos (el input file vacío no aporta).
+    if (!fd.get('poster')?.size) fd.delete('poster');
+    if (!fd.get('banner')?.size) fd.delete('banner');
+    try { await updateMediaDetails(id, fd); onSaved(); }
+    catch (err) { setError(err.message); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4" onClick={onClose}>
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-surface p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-xl font-bold">Editar título</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-white"><X size={20} /></button>
+        </div>
+
+        {error && <div className="mb-3 rounded border border-red-500/50 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</div>}
+        {!media ? (
+          <p className="text-gray-400">Cargando…</p>
+        ) : (
+          <form onSubmit={submit} className="space-y-3">
+            <Field label="Título">
+              <input name="title" defaultValue={media.title} className={inputCls} />
+            </Field>
+            <Field label="Descripción">
+              <textarea name="description" rows={3} defaultValue={media.description || ''} className={inputCls} />
+            </Field>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="Año">
+                <input name="release_year" type="number" defaultValue={media.release_year || ''} className={inputCls} />
+              </Field>
+              <Field label="Géneros (coma)">
+                <input name="genres" defaultValue={(media.genres || []).join(', ')} className={inputCls} />
+              </Field>
+            </div>
+            <Field label="Actores (coma)">
+              <input name="actors" defaultValue={(media.actors || []).join(', ')} className={inputCls} />
+            </Field>
+            <Field label="Etiquetas (coma)">
+              <input name="tags" defaultValue={(media.tags || []).join(', ')} className={inputCls} />
+            </Field>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="Nuevo póster (opcional)">
+                <input name="poster" type="file" accept="image/*" className={inputCls} />
+              </Field>
+              <Field label="Nuevo banner (opcional)">
+                <input name="banner" type="file" accept="image/*" className={inputCls} />
+              </Field>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={onClose} className="rounded bg-white/10 px-4 py-2 text-sm hover:bg-white/20">Cancelar</button>
+              <button type="submit" disabled={saving}
+                className="flex items-center gap-2 rounded bg-brand px-4 py-2 text-sm font-semibold hover:bg-red-700 disabled:opacity-50">
+                {saving ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle2 size={16} />} Guardar cambios
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ===========================================================================
-//  Pestaña BIBLIOTECA: ver / filtrar / eliminar.
+//  Pestaña BIBLIOTECA: ver / filtrar / editar / eliminar.
 // ===========================================================================
 function LibraryManager() {
   const PAGE_SIZE = 12;
@@ -443,6 +528,7 @@ function LibraryManager() {
   const [expanded, setExpanded] = useState(null);
   const [progress, setProgress] = useState({}); // { 'movie-8': 42, ... }
   const [reloadSignal, setReloadSignal] = useState(0);
+  const [editId, setEditId] = useState(null);   // id del título en edición
 
   // Debounce del texto de búsqueda (350ms).
   useEffect(() => {
@@ -565,7 +651,11 @@ function LibraryManager() {
                       {it.genres?.length ? ` · ${it.genres.join(', ')}` : ''}
                     </p>
                   </div>
-                  <div className="flex w-full gap-2 sm:w-auto">
+                  <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+                    <button onClick={() => setEditId(it.id)}
+                      className="flex flex-1 items-center justify-center gap-1 rounded bg-white/10 px-3 py-1.5 text-sm text-gray-200 hover:bg-white/20 sm:flex-none">
+                      <Pencil size={15} /> Editar
+                    </button>
                     <button onClick={() => toggleFeatured(it)}
                       title={it.featured ? 'Quitar de Estelares' : 'Marcar como Estelar'}
                       className={`flex flex-1 items-center justify-center gap-1 rounded px-3 py-1.5 text-sm sm:flex-none ${
@@ -608,6 +698,15 @@ function LibraryManager() {
             Siguiente
           </button>
         </div>
+      )}
+
+      {/* Modal de edición */}
+      {editId && (
+        <MediaEditModal
+          id={editId}
+          onClose={() => setEditId(null)}
+          onSaved={() => { setEditId(null); load(); }}
+        />
       )}
     </div>
   );

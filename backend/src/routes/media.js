@@ -116,22 +116,25 @@ router.get('/search', async (req, res) => {
   const like = `%${q}%`;
   try {
     const { rows } = await query(
-      `SELECT id, title, type, release_year, genres, actors,
+      `SELECT id, title, type, release_year, genres, actors, tags,
               poster_url, banner_url, duration,
               (title ILIKE $2) AS title_match,
               GREATEST(
                 similarity(lower(title), lower($1)),
                 similarity(lower(coalesce(array_to_string(genres, ' '), '')), lower($1)),
                 similarity(lower(coalesce(array_to_string(actors, ' '), '')), lower($1)),
+                similarity(lower(coalesce(array_to_string(tags,   ' '), '')), lower($1)),
                 similarity(lower(coalesce(description, '')), lower($1)) * 0.5
               ) AS score
          FROM media
         WHERE title ILIKE $2
            OR EXISTS (SELECT 1 FROM unnest(genres) g WHERE g ILIKE $2)
            OR EXISTS (SELECT 1 FROM unnest(actors) a WHERE a ILIKE $2)
+           OR EXISTS (SELECT 1 FROM unnest(tags)   t WHERE t ILIKE $2)
            OR similarity(lower(title), lower($1)) > 0.25
            OR similarity(lower(coalesce(array_to_string(actors, ' '), '')), lower($1)) > 0.25
            OR similarity(lower(coalesce(array_to_string(genres, ' '), '')), lower($1)) > 0.30
+           OR similarity(lower(coalesce(array_to_string(tags,   ' '), '')), lower($1)) > 0.30
         ORDER BY title_match DESC, score DESC, created_at DESC
         LIMIT 40`,
       [q, like]
