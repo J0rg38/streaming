@@ -373,11 +373,13 @@ export default function VideoPlayer({
       onPointerMove={wakeControls}
       onTouchStart={wakeControls}
     >
-      {/* Video: object-contain -> se ve correcto en cualquier relación de aspecto */}
+      {/* Video: object-contain -> se ve correcto en cualquier relación de aspecto.
+          pointer-events-none: los eventos de ratón los gestiona la CAPA DE
+          INTERACCIÓN de abajo (un div fiable), no el elemento <video> — que en
+          algunos monitores/compositores no entrega bien los eventos. */}
       <video
         ref={videoRef}
-        className="h-full w-full object-contain"
-        onClick={togglePlay}
+        className="pointer-events-none h-full w-full object-contain"
         onTimeUpdate={onTimeUpdate}
         onProgress={onTimeUpdate}
         onLoadedMetadata={onLoadedMeta}
@@ -391,6 +393,20 @@ export default function VideoPlayer({
         onPlaying={() => setBufferingBoth(false)}
         onSeeked={() => setBufferingBoth(false)}
         autoPlay
+      />
+
+      {/* Capa de interacción: un div SIEMPRE fiable por encima del video. Capta
+          el movimiento del ratón (para mostrar controles) y el clic (play/pausa)
+          sin depender de los eventos del elemento <video>. Queda por DEBAJO de
+          las barras de control (que van después en el DOM), así esas siguen
+          siendo clicables. */}
+      <div
+        className="absolute inset-0"
+        style={overlayLayer}
+        onClick={togglePlay}
+        onMouseMove={wakeControls}
+        onPointerMove={wakeControls}
+        onTouchStart={wakeControls}
       />
 
       {/* Spinner de carga */}
