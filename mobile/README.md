@@ -15,16 +15,19 @@ Edita `src/config.js` y pon la URL de tu backend:
   El teléfono y el PC deben estar en la **misma red WiFi**.
 - **Producción**: `https://test.cisne.com.pe`.
 
-## 2. Instalar dependencias (SDK más reciente)
-> Expo Go de la Play Store SÓLO abre proyectos del **SDK más reciente**. Por eso
-> instalamos el Expo actual y alineamos el resto de paquetes automáticamente.
+## 2. Instalar dependencias (SDK 54, el de tu Expo Go)
+> Si `npm install` da errores de `ERESOLVE` (conflicto de versiones entre
+> react-native / react-native-screens, etc.), usa este método a prueba de fallos:
+> instala ignorando peers y deja que **Expo fije las versiones exactas del SDK**.
 ```bash
 cd mobile
 rm -rf node_modules package-lock.json
-npm install
-# Alinea react-native, expo-* y demás con el SDK instalado:
-npx expo install --fix
+npm install --legacy-peer-deps    # instala aunque haya conflicto de "peers"
+npx expo install --fix            # corrige TODAS las versiones a las del SDK 54
 ```
+> `expo install --fix` es la clave: ajusta react, react-native, react-native-screens,
+> safe-area-context, expo-video y demás a las versiones **exactas** compatibles con
+> el SDK 54, resolviendo cualquier conflicto.
 
 ## 3. Arrancar
 ```bash

@@ -1,30 +1,37 @@
 // ----------------------------------------------------------------------------
-//  VideoPlayer.jsx — Reproductor de video personalizado con streaming
-//  adaptativo (HLS + hls.js).
+//  VideoPlayer.jsx — Reproductor de video profesional.
 //
 //  Props:
 //    - hlsUrl        : URL del master playlist HLS si está listo (o null).
 //    - progressiveUrl: URL de respaldo (MP4 progresivo por rangos).
+//    - thumbnailsUrl : WebVTT de miniaturas para el preview de la barra (o null).
 //    - mediaId       : id del título (obligatorio para guardar progreso).
 //    - episodeId     : id del capítulo (null si es película).
 //    - title         : texto de la barra superior.
 //    - restart       : si true, empieza desde 0 (ignora el progreso guardado).
+//    - nextItem, recommendations, onNavigate, onBack : pantalla de fin / navegación.
 //
-//  Cuando hay HLS, hls.js mide el ancho de banda y cambia de resolución
-//  automáticamente (ABR) igual que Netflix. Además se ofrece un selector
-//  manual de calidad. Si no hay HLS aún (transcodificando), usa el MP4.
+//  Diseño de la visibilidad de controles (robusto en cualquier monitor/aspecto):
+//    - Los controles SIEMPRE están en el DOM; sólo se hace fade con opacidad.
+//    - Se muestran ante cualquier actividad (mouse/pointer/touch/teclado) captada
+//      de forma redundante (contenedor + document).
+//    - Un único bucle decide cuándo ocultarlos por inactividad, y NUNCA lo hace
+//      si el video está en pausa/cargando o el ratón está sobre los controles.
+//    - El overlay se composita por encima del video (translateZ) para no quedar
+//      tapado por el overlay de hardware del video en monitores externos.
 // ----------------------------------------------------------------------------
 import { useEffect, useRef, useState, useCallback } from 'react';
 import {
-  Play, Pause, Volume2, VolumeX, Maximize,
-  RotateCcw, RotateCw, Settings, ArrowLeft, Loader2,
+  Play, Pause, Volume2, VolumeX, Maximize, Minimize,
+  RotateCcw, RotateCw, Settings, ArrowLeft, Loader2, Check,
 } from 'lucide-react';
-// hls.js se carga de forma diferida (import dinámico) para no engordar el
-// bundle inicial: sólo se descarga cuando se abre el reproductor.
 import { fetchProgress, saveProgress } from '../api.js';
 import EndScreen from './EndScreen.jsx';
 
-// Convierte segundos -> "mm:ss" / "h:mm:ss".
+const HIDE_AFTER_MS = 3500;   // inactividad antes de ocultar controles
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
+// Segundos -> "mm:ss" / "h:mm:ss".
 function fmt(t) {
   if (!Number.isFinite(t)) return '0:00';
   const h = Math.floor(t / 3600);
@@ -58,25 +65,141 @@ function parseThumbnailsVtt(text) {
   return cues;
 }
 
+const isFsElement = () => document.fullscreenElement || document.webkitFullscreenElement;
+
 export default function VideoPlayer({
   hlsUrl, progressiveUrl, thumbnailsUrl, mediaId, episodeId = null, title, restart = false,
   nextItem = null, recommendations = [], onNavigate, onBack,
 }) {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
-  const skipTimerRef = useRef(null); // temporizador del indicador de salto
-  const skipNonce = useRef(0);
-  const bufferingRef = useRef(true); // espejo de `buffering` para leer en timers
-  const hlsRef = useRef(null);       // instancia de hls.js
-  const [showEndScreen, setShowEndScreen] = useState(false);
-  const [buffering, setBuffering] = useState(true); // mostrando icono de carga
-  const [skipHint, setSkipHint] = useState(null);   // { dir, secs, nonce } al saltar
+  const hlsRef = useRef(null);
 
-  // Miniaturas del preview de la barra (sprite + cues del WebVTT).
+  // --- Estado de reproducción ---
+  const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const [current, setCurrent] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [bufferedEnd, setBufferedEnd] = useState(0);
+  const [buffering, setBuffering] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [speed, setSpeed] = useState(1);
+
+  // --- Controles / menús ---
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
+
+  // --- Calidad (HLS) ---
+  const [levels, setLevels] = useState([]);
+  const [selectedLevel, setSelectedLevel] = useState(-1); // -1 = Auto
+  const [autoLevel, setAutoLevel] = useState(-1);
+
+  // --- Miniaturas / preview ---
   const [cues, setCues] = useState([]);
   const [spriteUrl, setSpriteUrl] = useState(null);
   const [preview, setPreview] = useState({ visible: false, x: 0, time: 0 });
 
+  // --- Salto ±10s y pantalla de fin ---
+  const [skipHint, setSkipHint] = useState(null);
+  const [showEndScreen, setShowEndScreen] = useState(false);
+
+  // --- Refs auxiliares (para leer en timers sin closures obsoletas) ---
+  const bufferingRef = useRef(true);
+  const endScreenRef = useRef(false);
+  const pointerOverControlsRef = useRef(false);
+  const hideAtRef = useRef(Date.now() + HIDE_AFTER_MS);
+  const skipTimerRef = useRef(null);
+  const skipNonce = useRef(0);
+
+  const setBufferingBoth = (v) => { bufferingRef.current = v; setBuffering(v); };
+
+  // ==========================================================================
+  //  Configuración de la fuente (HLS con hls.js / HLS nativo / MP4 progresivo)
+  // ==========================================================================
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    let cancelled = false;
+
+    if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+    setLevels([]); setSelectedLevel(-1);
+    setShowEndScreen(false); endScreenRef.current = false;
+    setBufferingBoth(true);
+
+    const tryPlay = () => { v.play().catch(() => {}); };
+
+    (async () => {
+      if (hlsUrl) {
+        const { default: Hls } = await import('hls.js');
+        if (cancelled) return;
+        if (Hls.isSupported()) {
+          const hls = new Hls({ xhrSetup: (xhr) => { xhr.withCredentials = true; }, startLevel: -1 });
+          hls.loadSource(hlsUrl);
+          hls.attachMedia(v);
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            setLevels(hls.levels.map((l, i) => ({ index: i, height: l.height, bitrate: l.bitrate })));
+            tryPlay();
+          });
+          hls.on(Hls.Events.LEVEL_SWITCHED, (_e, data) => setAutoLevel(data.level));
+          hlsRef.current = hls;
+          return;
+        }
+        if (v.canPlayType('application/vnd.apple.mpegurl')) {
+          v.src = hlsUrl;
+          v.addEventListener('loadedmetadata', tryPlay, { once: true });
+          return;
+        }
+      }
+      v.src = progressiveUrl;
+      v.addEventListener('loadedmetadata', tryPlay, { once: true });
+    })();
+
+    return () => {
+      cancelled = true;
+      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+    };
+  }, [hlsUrl, progressiveUrl]);
+
+  // ==========================================================================
+  //  Reanudar desde el progreso guardado (salvo restart)
+  // ==========================================================================
+  useEffect(() => {
+    if (restart) return;
+    let cancelled = false;
+    fetchProgress(mediaId, episodeId).then(({ stopped_at }) => {
+      const v = videoRef.current;
+      if (cancelled || !v || !stopped_at) return;
+      const seek = () => {
+        const dur = v.duration;
+        const finished = dur && (stopped_at >= dur - 15 || stopped_at / dur >= 0.95);
+        if (!finished) v.currentTime = stopped_at;
+      };
+      if (v.readyState >= 1) seek();
+      else v.addEventListener('loadedmetadata', seek, { once: true });
+    });
+    return () => { cancelled = true; };
+  }, [mediaId, episodeId, restart]);
+
+  // ==========================================================================
+  //  Guardado del progreso (periódico, al salir y al desmontar)
+  // ==========================================================================
+  const persist = useCallback(() => {
+    const v = videoRef.current;
+    if (!v || !mediaId || !v.currentTime) return;
+    saveProgress(mediaId, episodeId, v.currentTime).catch(() => {});
+  }, [mediaId, episodeId]);
+
+  useEffect(() => {
+    const id = setInterval(() => { if (!videoRef.current?.paused) persist(); }, 10000);
+    const onUnload = () => persist();
+    window.addEventListener('beforeunload', onUnload);
+    return () => { clearInterval(id); window.removeEventListener('beforeunload', onUnload); persist(); };
+  }, [persist]);
+
+  // ==========================================================================
+  //  Miniaturas (WebVTT)
+  // ==========================================================================
   useEffect(() => {
     setCues([]); setSpriteUrl(null);
     if (!thumbnailsUrl) return;
@@ -88,351 +211,202 @@ export default function VideoPlayer({
         setCues(parseThumbnailsVtt(text));
         setSpriteUrl(thumbnailsUrl.replace('thumbnails.vtt', 'thumbnails.jpg'));
       })
-      .catch(() => { /* sin miniaturas: no pasa nada */ });
+      .catch(() => {});
     return () => { cancelled = true; };
   }, [thumbnailsUrl]);
 
-  const [playing, setPlaying] = useState(false);
-  const [muted, setMuted] = useState(false);
-  const [volume, setVolume] = useState(1);
-  const [current, setCurrent] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [showControls, setShowControls] = useState(true);
+  // ==========================================================================
+  //  Visibilidad de los controles
+  // ==========================================================================
+  const wakeControls = useCallback(() => {
+    hideAtRef.current = Date.now() + HIDE_AFTER_MS;
+    setControlsVisible(true);
+  }, []);
 
-  // Calidad (HLS): niveles disponibles, selección manual (-1 = automático) y
-  // el nivel que el ABR está usando en cada momento.
-  const [levels, setLevels] = useState([]);
-  const [selectedLevel, setSelectedLevel] = useState(-1); // -1 = Auto
-  const [autoLevel, setAutoLevel] = useState(-1);
-  const [showQuality, setShowQuality] = useState(false);
-
-  // --- Configuración de la fuente: HLS (hls.js / nativo) o MP4 progresivo ---
+  // Bucle único que decide cuándo ocultar (robusto y sin depender de un evento).
   useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    let cancelled = false;
-
-    // Limpiamos cualquier instancia previa de hls.js.
-    if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
-    setLevels([]);
-    setShowEndScreen(false); // nuevo video -> ocultamos la pantalla de fin
-    bufferingRef.current = true;
-    setBuffering(true);      // mostramos el icono de carga hasta que pueda reproducir
-
-    // Intenta iniciar la reproducción automáticamente. Si el navegador la
-    // bloquea (política de autoplay), se queda en pausa y el usuario dará play.
-    const tryPlay = () => { v.play().catch(() => {}); };
-
-    async function setup() {
-      if (hlsUrl) {
-        // Import dinámico: hls.js se descarga en su propio chunk bajo demanda.
-        const { default: Hls } = await import('hls.js');
-        if (cancelled) return;
-
-        if (Hls.isSupported()) {
-          // hls.js: ABR automático. withCredentials envía la cookie de sesión.
-          const hls = new Hls({
-            xhrSetup: (xhr) => { xhr.withCredentials = true; },
-            startLevel: -1,
-          });
-          hls.loadSource(hlsUrl);
-          hls.attachMedia(v);
-          hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            const lv = hls.levels.map((l, i) => ({ index: i, height: l.height, bitrate: l.bitrate }));
-            setLevels(lv);
-            tryPlay(); // <-- arranque automático (el atributo autoplay no basta con hls.js)
-          });
-          hls.on(Hls.Events.LEVEL_SWITCHED, (_e, data) => setAutoLevel(data.level));
-          hlsRef.current = hls;
-          return;
-        }
-        if (v.canPlayType('application/vnd.apple.mpegurl')) {
-          v.src = hlsUrl; // Safari: HLS nativo
-          v.addEventListener('loadedmetadata', tryPlay, { once: true });
-          return;
-        }
-      }
-      // Respaldo: MP4 progresivo por rangos HTTP (mientras se transcodifica).
-      v.src = progressiveUrl;
-      v.addEventListener('loadedmetadata', tryPlay, { once: true });
-    }
-    setup();
-
-    return () => {
-      cancelled = true;
-      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
-    };
-  }, [hlsUrl, progressiveUrl]);
-
-  // Cambia la calidad manualmente. levelIndex = -1 -> automático (ABR).
-  const setQuality = (levelIndex) => {
-    if (hlsRef.current) hlsRef.current.currentLevel = levelIndex;
-    setSelectedLevel(levelIndex);
-    setShowQuality(false);
-  };
-
-  // --- Guardado del progreso (reutilizable) -------------------------------
-  const persist = useCallback(() => {
-    const v = videoRef.current;
-    if (!v || !mediaId || !v.currentTime) return;
-    saveProgress(mediaId, episodeId, v.currentTime).catch(() => {});
-  }, [mediaId, episodeId]);
-
-  // --- Al montar / cambiar de video: recuperar posición previa ------------
-  //  Si restart=true ("Ver desde el inicio"), NO reanudamos: empezamos en 0.
-  useEffect(() => {
-    if (restart) return; // arrancar desde el principio
-    let cancelled = false;
-    fetchProgress(mediaId, episodeId).then(({ stopped_at }) => {
+    const id = setInterval(() => {
       const v = videoRef.current;
-      if (!cancelled && v && stopped_at > 0) {
-        // Esperamos a tener metadata para conocer la duración.
-        const seek = () => {
-          const dur = v.duration;
-          // Si ya estaba (prácticamente) terminado, empezamos desde el inicio
-          // en lugar de reanudar al final. Evita el bucle de "ya visto" que
-          // saltaba de una peli terminada a otra retomándola en su final.
-          const finished = dur && (stopped_at >= dur - 15 || stopped_at / dur >= 0.95);
-          if (!finished) v.currentTime = stopped_at;
-        };
-        if (v.readyState >= 1) seek();
-        else v.addEventListener('loadedmetadata', seek, { once: true });
+      const keepOpen = !v || v.paused || bufferingRef.current
+        || pointerOverControlsRef.current || endScreenRef.current || showSettings;
+      if (!keepOpen && Date.now() > hideAtRef.current) {
+        setControlsVisible((s) => (s ? false : s));
       }
-    });
-    return () => { cancelled = true; };
-  }, [mediaId, episodeId, restart]);
+    }, 250);
+    return () => clearInterval(id);
+  }, [showSettings]);
 
-  // --- Guardado periódico cada 10 segundos --------------------------------
+  // Actividad redundante a nivel de documento (mousemove Y pointermove: algunos
+  // entornos en pantalla completa disparan uno pero no el otro).
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (!videoRef.current?.paused) persist();
-    }, 10_000); // <-- cada 10s, según requisito
-    return () => clearInterval(interval);
-  }, [persist]);
-
-  // --- Guardar también al abandonar la página (cerrar/refrescar) ----------
-  useEffect(() => {
-    const onUnload = () => persist();
-    window.addEventListener('beforeunload', onUnload);
+    const wake = () => wakeControls();
+    const evts = ['mousemove', 'pointermove', 'mousedown', 'pointerdown', 'touchstart', 'keydown'];
+    for (const ev of evts) document.addEventListener(ev, wake, { passive: true });
+    const onFs = () => { setIsFullscreen(!!isFsElement()); wakeControls(); };
+    document.addEventListener('fullscreenchange', onFs);
+    document.addEventListener('webkitfullscreenchange', onFs);
     return () => {
-      window.removeEventListener('beforeunload', onUnload);
-      persist(); // guardar al desmontar (p.ej. cambiar de capítulo)
+      for (const ev of evts) document.removeEventListener(ev, wake);
+      document.removeEventListener('fullscreenchange', onFs);
+      document.removeEventListener('webkitfullscreenchange', onFs);
     };
-  }, [persist]);
+  }, [wakeControls]);
 
-  // --- Handlers del elemento <video> --------------------------------------
+  // En pausa, controles siempre visibles.
+  useEffect(() => { if (!playing) { setControlsVisible(true); } else wakeControls(); }, [playing, wakeControls]);
+
+  // ==========================================================================
+  //  Handlers de reproducción
+  // ==========================================================================
   const togglePlay = () => {
     const v = videoRef.current;
     if (!v) return;
-    if (v.paused) { v.play(); setPlaying(true); }
-    else { v.pause(); setPlaying(false); persist(); }
+    if (v.paused) v.play(); else { v.pause(); persist(); }
+    wakeControls();
   };
 
-  const onTimeUpdate = () => setCurrent(videoRef.current?.currentTime || 0);
+  const onTimeUpdate = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    setCurrent(v.currentTime || 0);
+    try {
+      const b = v.buffered;
+      for (let i = 0; i < b.length; i++) {
+        if (b.start(i) <= v.currentTime && v.currentTime <= b.end(i)) { setBufferedEnd(b.end(i)); break; }
+      }
+    } catch { /* noop */ }
+  };
   const onLoadedMeta = () => setDuration(videoRef.current?.duration || 0);
 
   const seekTo = (value) => {
     const v = videoRef.current;
-    if (v) { v.currentTime = value; setCurrent(value); }
+    if (v && Number.isFinite(value)) { v.currentTime = value; setCurrent(value); }
   };
 
-  // Salto ±Ns leyendo el video directamente (robusto ante closures) + muestra
-  // un indicador animado de "+10s / -10s" (estilo Netflix).
   const skip = (delta) => {
     const v = videoRef.current;
     if (!v) return;
-    const target = Math.max(0, Math.min(v.duration || Infinity, v.currentTime + delta));
-    v.currentTime = target;
-    setCurrent(target);
-    // nonce cambia cada vez para reiniciar la animación en pulsaciones repetidas.
+    v.currentTime = Math.max(0, Math.min(v.duration || Infinity, v.currentTime + delta));
+    setCurrent(v.currentTime);
     setSkipHint({ dir: delta < 0 ? -1 : 1, secs: Math.abs(delta), nonce: (skipNonce.current += 1) });
     clearTimeout(skipTimerRef.current);
     skipTimerRef.current = setTimeout(() => setSkipHint(null), 650);
+    wakeControls();
   };
 
-  // --- Visibilidad de los controles: sistema robusto por "última actividad" --
-  //  Marcamos la última interacción y un intervalo decide cuándo ocultar. Es
-  //  mucho más fiable en pantalla completa (cualquier monitor/resolución) que
-  //  depender de un único evento o de un setTimeout que se puede desincronizar.
-  const lastActivityRef = useRef(Date.now());
-  const showControlsTemporarily = useCallback(() => {
-    lastActivityRef.current = Date.now();
-    setShowControls(true);
-  }, []);
+  const changeVolume = (value) => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.volume = value; v.muted = value === 0;
+    setVolume(value); setMuted(value === 0);
+  };
+  const toggleMute = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.muted = !v.muted; setMuted(v.muted);
+    if (!v.muted && v.volume === 0) { v.volume = 0.5; setVolume(0.5); }
+  };
 
-  // Intervalo que oculta los controles tras 3s de inactividad (salvo pausa/carga).
-  useEffect(() => {
-    const id = setInterval(() => {
-      const v = videoRef.current;
-      if (!v) return;
-      if (v.paused || bufferingRef.current) return; // no ocultar en pausa/buffering
-      if (Date.now() - lastActivityRef.current > 3000) {
-        setShowControls((s) => (s ? false : s));
-      }
-    }, 500);
-    return () => clearInterval(id);
-  }, []);
+  const setQuality = (levelIndex) => {
+    if (hlsRef.current) hlsRef.current.currentLevel = levelIndex;
+    setSelectedLevel(levelIndex);
+  };
+  const changeSpeed = (s) => {
+    const v = videoRef.current;
+    if (v) v.playbackRate = s;
+    setSpeed(s);
+  };
 
-  // Escucha de actividad. Usamos MOUSEMOVE y POINTERMOVE (algunos entornos en
-  // pantalla completa disparan uno pero no el otro), en document y window, para
-  // que los controles reaparezcan al mover el ratón en CUALQUIER pantalla.
-  useEffect(() => {
-    const wake = () => showControlsTemporarily();
-    const events = ['mousemove', 'pointermove', 'mousedown', 'pointerdown', 'touchstart', 'keydown'];
-    for (const ev of events) {
-      document.addEventListener(ev, wake, { passive: true });
-      window.addEventListener(ev, wake, { passive: true });
-    }
-    document.addEventListener('fullscreenchange', wake);
-    document.addEventListener('webkitfullscreenchange', wake);
-    return () => {
-      for (const ev of events) {
-        document.removeEventListener(ev, wake);
-        window.removeEventListener(ev, wake);
-      }
-      document.removeEventListener('fullscreenchange', wake);
-      document.removeEventListener('webkitfullscreenchange', wake);
-    };
-  }, [showControlsTemporarily]);
+  const toggleFullscreen = () => {
+    const el = containerRef.current;
+    if (!isFsElement()) (el?.requestFullscreen || el?.webkitRequestFullscreen)?.call(el);
+    else (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+    wakeControls();
+  };
 
-  // Con el video en pausa, los controles quedan visibles de forma permanente.
-  useEffect(() => {
-    if (!playing) setShowControls(true);
-    else showControlsTemporarily();
-  }, [playing, showControlsTemporarily]);
+  const handleEnded = () => { persist(); endScreenRef.current = true; setShowEndScreen(true); };
+  const handleReplay = () => {
+    const v = videoRef.current;
+    if (v) { v.currentTime = 0; v.play(); }
+    endScreenRef.current = false; setShowEndScreen(false);
+  };
 
-  // --- Atajos de teclado ---------------------------------------------------
-  //  ← / → : retroceder / avanzar 10s. Espacio o K: play/pausa.
-  //  ↑ / ↓ : subir / bajar volumen. F: pantalla completa. M: silenciar.
+  // ==========================================================================
+  //  Atajos de teclado
+  // ==========================================================================
   useEffect(() => {
     const onKey = (e) => {
       const v = videoRef.current;
       if (!v) return;
       switch (e.key) {
-        case 'ArrowRight':
-          e.preventDefault();
-          skip(10);
-          showControlsTemporarily();
-          break;
-        case 'ArrowLeft':
-          e.preventDefault();
-          skip(-10);
-          showControlsTemporarily();
-          break;
-        case ' ':
-        case 'k':
-          e.preventDefault();
-          if (v.paused) v.play(); else v.pause();
-          showControlsTemporarily();
-          break;
-        case 'ArrowUp':
-          e.preventDefault();
-          changeVolume(Math.min(1, (v.muted ? 0 : v.volume) + 0.05));
-          showControlsTemporarily();
-          break;
-        case 'ArrowDown':
-          e.preventDefault();
-          changeVolume(Math.max(0, v.volume - 0.05));
-          showControlsTemporarily();
-          break;
-        case 'f':
-          toggleFullscreen();
-          break;
-        case 'm':
-          toggleMute();
-          showControlsTemporarily();
-          break;
-        default:
-          break;
+        case 'ArrowRight': e.preventDefault(); skip(10); break;
+        case 'ArrowLeft': e.preventDefault(); skip(-10); break;
+        case ' ': case 'k': e.preventDefault(); togglePlay(); break;
+        case 'ArrowUp': e.preventDefault(); changeVolume(Math.min(1, (v.muted ? 0 : v.volume) + 0.05)); break;
+        case 'ArrowDown': e.preventDefault(); changeVolume(Math.max(0, v.volume - 0.05)); break;
+        case 'f': toggleFullscreen(); break;
+        case 'm': toggleMute(); break;
+        default: break;
       }
+      wakeControls();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showControlsTemporarily]);
-
-  const changeVolume = (value) => {
-    const v = videoRef.current;
-    if (!v) return;
-    v.volume = value;
-    setVolume(value);
-    setMuted(value === 0);
-  };
-
-  const toggleMute = () => {
-    const v = videoRef.current;
-    if (!v) return;
-    v.muted = !v.muted;
-    setMuted(v.muted);
-  };
-
-  const toggleFullscreen = () => {
-    const el = containerRef.current;
-    const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
-    if (!fsEl) {
-      (el?.requestFullscreen || el?.webkitRequestFullscreen)?.call(el);
-    } else {
-      (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
-    }
-    // Al cambiar de modo, despertamos los controles de inmediato.
-    showControlsTemporarily();
-  };
-
-  // Al terminar el video: guardamos progreso y mostramos la pantalla de fin.
-  const handleEnded = () => {
-    persist();
-    setShowEndScreen(true);
-  };
-
-  // "Ver de nuevo": reinicia desde 0 y oculta la pantalla de fin.
-  const handleReplay = () => {
-    const v = videoRef.current;
-    if (v) { v.currentTime = 0; v.play(); }
-    setShowEndScreen(false);
-  };
+  }, [wakeControls]);
 
   const progressPct = duration ? (current / duration) * 100 : 0;
+  const bufferedPct = duration ? Math.min(100, (bufferedEnd / duration) * 100) : 0;
+  const previewCue = preview.visible && cues.length
+    ? (cues.find((c) => preview.time >= c.start && preview.time < c.end) || cues[cues.length - 1])
+    : null;
+
+  // Estilo que fuerza la capa por encima del overlay de hardware del video.
+  const overlayLayer = { transform: 'translateZ(0)', willChange: 'opacity' };
+  const controlsCls = `transition-opacity duration-300 ${controlsVisible ? 'opacity-100' : 'pointer-events-none opacity-0'}`;
 
   return (
     <div
       ref={containerRef}
-      className={`relative h-full w-full bg-black ${showControls ? '' : 'cursor-none'}`}
-      onMouseMove={showControlsTemporarily}
-      onPointerMove={showControlsTemporarily}
+      className={`relative h-full w-full select-none bg-black ${controlsVisible ? '' : 'cursor-none'}`}
+      onMouseMove={wakeControls}
+      onPointerMove={wakeControls}
+      onTouchStart={wakeControls}
     >
-      {/* La fuente (HLS o MP4) la asigna el efecto de configuración.
-          object-contain evita que el video se deforme en pantalla completa. */}
+      {/* Video: object-contain -> se ve correcto en cualquier relación de aspecto */}
       <video
         ref={videoRef}
         className="h-full w-full object-contain"
         onClick={togglePlay}
         onTimeUpdate={onTimeUpdate}
+        onProgress={onTimeUpdate}
         onLoadedMetadata={onLoadedMeta}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={handleEnded}
-        onWaiting={() => { bufferingRef.current = true; setBuffering(true); setShowControls(true); }}
-        onSeeking={() => { bufferingRef.current = true; setBuffering(true); }}
-        onCanPlay={() => { bufferingRef.current = false; setBuffering(false); }}
-        onPlaying={() => { bufferingRef.current = false; setBuffering(false); }}
-        onSeeked={() => { bufferingRef.current = false; setBuffering(false); }}
+        onWaiting={() => { setBufferingBoth(true); wakeControls(); }}
+        onStalled={() => setBufferingBoth(true)}
+        onSeeking={() => setBufferingBoth(true)}
+        onCanPlay={() => setBufferingBoth(false)}
+        onPlaying={() => setBufferingBoth(false)}
+        onSeeked={() => setBufferingBoth(false)}
         autoPlay
       />
 
-      {/* Icono de carga (buffering / carga inicial) */}
+      {/* Spinner de carga */}
       {buffering && !showEndScreen && (
-        <div className="pointer-events-none absolute inset-0 grid place-items-center">
+        <div className="pointer-events-none absolute inset-0 grid place-items-center" style={overlayLayer}>
           <Loader2 size={56} className="animate-spin text-white/90 drop-shadow-lg" />
         </div>
       )}
 
-      {/* Indicador animado de salto ±10s (estilo Netflix) */}
+      {/* Indicador de salto ±10s */}
       <style>{`@keyframes skipfade{0%{opacity:0;transform:scale(.7)}25%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1)}}`}</style>
       {skipHint && (
         <div
           key={skipHint.nonce}
           className={`pointer-events-none absolute top-1/2 -translate-y-1/2 ${skipHint.dir < 0 ? 'left-[12%]' : 'right-[12%]'}`}
-          style={{ animation: 'skipfade 650ms ease-out forwards' }}
+          style={{ ...overlayLayer, animation: 'skipfade 650ms ease-out forwards' }}
         >
           <div className="flex h-20 w-20 flex-col items-center justify-center rounded-full bg-black/60 text-white backdrop-blur">
             {skipHint.dir < 0 ? <RotateCcw size={26} /> : <RotateCw size={26} />}
@@ -441,160 +415,150 @@ export default function VideoPlayer({
         </div>
       )}
 
-      {/* Barra superior: botón volver + título (mismo patrón que Netflix) */}
-      {showControls && (
-        <div className="pointer-events-none absolute left-0 top-0 w-full bg-gradient-to-b from-black/80 to-transparent p-4">
-          <div className="flex items-center gap-3">
-            {onBack && (
-              <button
-                onClick={onBack}
-                className="pointer-events-auto flex flex-shrink-0 items-center gap-1 rounded bg-black/40 px-3 py-1.5 text-sm text-white hover:bg-black/70"
-              >
-                <ArrowLeft size={18} /> Volver
-              </button>
-            )}
-            <h2 className="min-w-0 truncate text-lg font-semibold drop-shadow">{title}</h2>
-          </div>
-        </div>
+      {/* Botón central grande de play cuando está pausado (y sin buffering) */}
+      {!playing && !buffering && !showEndScreen && (
+        <button
+          onClick={togglePlay}
+          className="absolute inset-0 grid place-items-center"
+          style={overlayLayer}
+          aria-label="Reproducir"
+        >
+          <span className="grid h-20 w-20 place-items-center rounded-full bg-black/50 text-white backdrop-blur transition-transform hover:scale-110">
+            <Play size={40} fill="currentColor" />
+          </span>
+        </button>
       )}
 
-      {/* -------- Barra de controles inferior -------- */}
-      {showControls && (
-        <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/80 to-transparent px-4 pb-4 pt-10">
-          {/* Barra de progreso (seekable) con preview de miniaturas */}
-          <div
-            className="relative mb-2"
-            onMouseMove={(e) => {
-              showControlsTemporarily(); // mantener controles visibles al usar la barra
-              if (!cues.length || !duration || !spriteUrl) return;
-              const rect = e.currentTarget.getBoundingClientRect();
-              const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-              setPreview({ visible: true, x: ratio * rect.width, time: ratio * duration });
-            }}
-            onMouseLeave={() => setPreview((p) => ({ ...p, visible: false }))}
-          >
-            {/* Miniatura flotante en el punto donde está el cursor */}
-            {preview.visible && spriteUrl && (() => {
-              const cue = cues.find((c) => preview.time >= c.start && preview.time < c.end) || cues[cues.length - 1];
-              if (!cue) return null;
-              // Clamp horizontal para que la miniatura no se salga del contenedor.
-              const half = cue.w / 2;
-              const left = Math.min(Math.max(preview.x, half), (containerRef.current?.clientWidth || 9999) - half);
-              return (
-                <div className="pointer-events-none absolute bottom-5 -translate-x-1/2" style={{ left }}>
-                  <div
-                    className="rounded border border-white/40 shadow-lg"
-                    style={{
-                      width: cue.w, height: cue.h,
-                      backgroundImage: `url(${spriteUrl})`,
-                      backgroundPosition: `-${cue.x}px -${cue.y}px`,
-                      backgroundRepeat: 'no-repeat',
-                    }}
-                  />
-                  <div className="mt-0.5 text-center text-xs font-medium text-white drop-shadow">{fmt(preview.time)}</div>
-                </div>
-              );
-            })()}
+      {/* -------- Barra superior: volver + título -------- */}
+      <div className={`absolute left-0 top-0 w-full bg-gradient-to-b from-black/80 to-transparent p-4 ${controlsCls}`} style={overlayLayer}>
+        <div className="flex items-center gap-3">
+          {onBack && (
+            <button onClick={onBack} className="flex flex-shrink-0 items-center gap-1 rounded bg-black/40 px-3 py-1.5 text-sm text-white hover:bg-black/70">
+              <ArrowLeft size={18} /> Volver
+            </button>
+          )}
+          <h2 className="min-w-0 truncate text-lg font-semibold text-white drop-shadow">{title}</h2>
+        </div>
+      </div>
 
+      {/* -------- Barra de controles inferior -------- */}
+      <div
+        className={`absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/85 via-black/40 to-transparent px-3 pb-3 pt-12 sm:px-4 sm:pb-4 ${controlsCls}`}
+        style={overlayLayer}
+        onMouseEnter={() => { pointerOverControlsRef.current = true; }}
+        onMouseLeave={() => { pointerOverControlsRef.current = false; }}
+      >
+        {/* Barra de progreso con buffer + preview de miniaturas */}
+        <div
+          className="relative mb-2"
+          onMouseMove={(e) => {
+            wakeControls();
+            if (!cues.length || !duration || !spriteUrl) return;
+            const rect = e.currentTarget.getBoundingClientRect();
+            const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+            setPreview({ visible: true, x: ratio * rect.width, time: ratio * duration });
+          }}
+          onMouseLeave={() => setPreview((p) => ({ ...p, visible: false }))}
+        >
+          {/* Miniatura flotante */}
+          {previewCue && spriteUrl && (
+            <div
+              className="pointer-events-none absolute bottom-5 -translate-x-1/2"
+              style={{ left: Math.min(Math.max(preview.x, previewCue.w / 2), (containerRef.current?.clientWidth || 9999) - previewCue.w / 2) }}
+            >
+              <div
+                className="rounded border border-white/40 shadow-lg"
+                style={{ width: previewCue.w, height: previewCue.h, backgroundImage: `url(${spriteUrl})`, backgroundPosition: `-${previewCue.x}px -${previewCue.y}px`, backgroundRepeat: 'no-repeat' }}
+              />
+              <div className="mt-0.5 text-center text-xs font-medium text-white drop-shadow">{fmt(preview.time)}</div>
+            </div>
+          )}
+
+          {/* Pista con buffer + progreso (input range encima) */}
+          <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-white/25">
+            <div className="absolute inset-y-0 left-0 bg-white/40" style={{ width: `${bufferedPct}%` }} />
+            <div className="absolute inset-y-0 left-0 bg-brand" style={{ width: `${progressPct}%` }} />
+          </div>
+          <input
+            type="range" min={0} max={duration || 0} step="0.1" value={current}
+            onChange={(e) => seekTo(Number(e.target.value))}
+            className="absolute inset-x-0 top-1/2 h-4 w-full -translate-y-1/2 cursor-pointer opacity-0"
+            aria-label="Barra de progreso"
+          />
+        </div>
+
+        {/* Fila de botones */}
+        <div className="flex items-center gap-2 text-white sm:gap-4">
+          <button onClick={togglePlay} className="hover:text-brand">
+            {playing ? <Pause size={26} /> : <Play size={26} />}
+          </button>
+          <button onClick={() => skip(-10)} className="hover:text-brand" title="-10s"><RotateCcw size={20} /></button>
+          <button onClick={() => skip(10)} className="hover:text-brand" title="+10s"><RotateCw size={20} /></button>
+
+          {/* Volumen (deslizador oculto en móvil) */}
+          <div className="flex items-center gap-2">
+            <button onClick={toggleMute} className="hover:text-brand">
+              {muted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
+            </button>
             <input
-              type="range"
-              min={0}
-              max={duration || 0}
-              step="0.1"
-              value={current}
-              onChange={(e) => seekTo(Number(e.target.value))}
-              className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-gray-600 accent-brand"
-              style={{
-                background: `linear-gradient(to right, #E35336 ${progressPct}%, #4b5563 ${progressPct}%)`,
-              }}
+              type="range" min={0} max={1} step="0.05" value={muted ? 0 : volume}
+              onChange={(e) => changeVolume(Number(e.target.value))}
+              className="hidden h-1 w-20 cursor-pointer appearance-none rounded-full bg-gray-500 accent-white sm:block"
             />
           </div>
 
-          <div className="flex items-center gap-2 text-white sm:gap-4">
-            {/* Play / pausa */}
-            <button onClick={togglePlay} className="hover:text-brand">
-              {playing ? <Pause size={24} /> : <Play size={24} />}
+          <span className="whitespace-nowrap text-xs tabular-nums text-gray-200 sm:text-sm">
+            {fmt(current)} / {fmt(duration)}
+          </span>
+
+          <div className="flex-1" />
+
+          {/* Ajustes: velocidad + calidad */}
+          <div className="relative">
+            <button onClick={() => setShowSettings((s) => !s)} className="flex items-center gap-1 hover:text-brand" title="Ajustes">
+              <Settings size={22} />
             </button>
-
-            {/* Saltos ±10s */}
-            <button onClick={() => skip(-10)} className="hover:text-brand" title="-10s">
-              <RotateCcw size={20} />
-            </button>
-            <button onClick={() => skip(10)} className="hover:text-brand" title="+10s">
-              <RotateCw size={20} />
-            </button>
-
-            {/* Volumen (el deslizador se oculta en móvil; queda el silenciar) */}
-            <div className="flex items-center gap-2">
-              <button onClick={toggleMute} className="hover:text-brand">
-                {muted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
-              </button>
-              <input
-                type="range"
-                min={0} max={1} step="0.05"
-                value={muted ? 0 : volume}
-                onChange={(e) => changeVolume(Number(e.target.value))}
-                className="hidden h-1 w-20 cursor-pointer appearance-none rounded-full bg-gray-600 accent-white sm:block"
-              />
-            </div>
-
-            {/* Tiempo */}
-            <span className="whitespace-nowrap text-xs tabular-nums text-gray-200 sm:text-sm">
-              {fmt(current)} / {fmt(duration)}
-            </span>
-
-            <div className="flex-1" />
-
-            {/* Selector de calidad (sólo con HLS y varios niveles) */}
-            {levels.length > 1 && (
-              <div className="relative">
-                <button
-                  onClick={() => setShowQuality((s) => !s)}
-                  className="flex items-center gap-1 hover:text-brand"
-                  title="Calidad"
-                >
-                  <Settings size={22} />
-                  <span className="text-xs">
-                    {selectedLevel === -1
-                      ? `Auto${autoLevel >= 0 && levels[autoLevel] ? ` (${levels[autoLevel].height}p)` : ''}`
-                      : `${levels.find((l) => l.index === selectedLevel)?.height}p`}
-                  </span>
-                </button>
-
-                {showQuality && (
-                  <div className="absolute bottom-9 right-0 min-w-[140px] overflow-hidden rounded-md bg-black/90 py-1 text-sm shadow-xl">
-                    {/* Automático (ABR) */}
-                    <button
-                      onClick={() => setQuality(-1)}
-                      className={`flex w-full items-center justify-between px-4 py-2 hover:bg-white/10 ${selectedLevel === -1 ? 'text-brand' : ''}`}
-                    >
-                      Automático
-                      {selectedLevel === -1 && <span className="text-xs text-gray-400">ABR</span>}
+            {showSettings && (
+              <div className="absolute bottom-10 right-0 w-52 overflow-hidden rounded-lg bg-black/95 py-2 text-sm shadow-2xl">
+                {/* Velocidad */}
+                <p className="px-4 pb-1 pt-1 text-xs uppercase tracking-wide text-gray-400">Velocidad</p>
+                <div className="flex flex-wrap gap-1 px-3 pb-2">
+                  {SPEEDS.map((s) => (
+                    <button key={s} onClick={() => changeSpeed(s)}
+                      className={`rounded px-2 py-1 text-xs ${speed === s ? 'bg-brand text-white' : 'bg-white/10 text-gray-200 hover:bg-white/20'}`}>
+                      {s === 1 ? 'Normal' : `${s}x`}
                     </button>
-                    {/* Niveles concretos, de mayor a menor */}
+                  ))}
+                </div>
+                {/* Calidad (sólo con HLS y varios niveles) */}
+                {levels.length > 1 && (
+                  <>
+                    <p className="px-4 pb-1 pt-2 text-xs uppercase tracking-wide text-gray-400">Calidad</p>
+                    <button onClick={() => setQuality(-1)}
+                      className={`flex w-full items-center justify-between px-4 py-2 hover:bg-white/10 ${selectedLevel === -1 ? 'text-brand' : ''}`}>
+                      <span>Automática {autoLevel >= 0 && levels[autoLevel] ? `(${levels[autoLevel].height}p)` : ''}</span>
+                      {selectedLevel === -1 && <Check size={16} />}
+                    </button>
                     {[...levels].sort((a, b) => b.height - a.height).map((l) => (
-                      <button
-                        key={l.index}
-                        onClick={() => setQuality(l.index)}
-                        className={`block w-full px-4 py-2 text-left hover:bg-white/10 ${selectedLevel === l.index ? 'text-brand' : ''}`}
-                      >
-                        {l.height}p
+                      <button key={l.index} onClick={() => setQuality(l.index)}
+                        className={`flex w-full items-center justify-between px-4 py-2 hover:bg-white/10 ${selectedLevel === l.index ? 'text-brand' : ''}`}>
+                        <span>{l.height}p</span>
+                        {selectedLevel === l.index && <Check size={16} />}
                       </button>
                     ))}
-                  </div>
+                  </>
                 )}
               </div>
             )}
-
-            {/* Pantalla completa */}
-            <button onClick={toggleFullscreen} className="hover:text-brand">
-              <Maximize size={22} />
-            </button>
           </div>
-        </div>
-      )}
 
-      {/* -------- Pantalla de fin (recomendaciones + autoplay) -------- */}
+          <button onClick={toggleFullscreen} className="hover:text-brand" title="Pantalla completa">
+            {isFullscreen ? <Minimize size={22} /> : <Maximize size={22} />}
+          </button>
+        </div>
+      </div>
+
+      {/* -------- Pantalla de fin -------- */}
       {showEndScreen && (
         <EndScreen
           nextItem={nextItem}
