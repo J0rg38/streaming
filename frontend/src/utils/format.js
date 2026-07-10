@@ -12,6 +12,15 @@ export function formatMinutes(secs) {
   return `${Math.round(secs)}s`;
 }
 
+// Bytes -> "1.5 TB" / "320 GB" / "800 MB".
+export function formatBytes(bytes) {
+  if (bytes == null || Number.isNaN(bytes)) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  let n = bytes, i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return `${n.toFixed(n >= 100 || i <= 1 ? 0 : 1)} ${units[i]}`;
+}
+
 // Segundos -> "mm:ss" / "h:mm:ss" (para el reproductor).
 export function formatClock(t) {
   if (!Number.isFinite(t)) return '0:00';

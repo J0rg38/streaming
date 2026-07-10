@@ -19,14 +19,11 @@ import path from 'path';
 import ffmpegStatic from 'ffmpeg-static';
 import ffprobeStatic from 'ffprobe-static';
 import { query } from './db.js';
+import { hlsDirFor, DISKS } from './storage.js';
 
 // Preferimos binarios por env; si no, los estáticos de npm; si no, el del sistema.
 const FFMPEG  = process.env.FFMPEG_PATH  || ffmpegStatic || 'ffmpeg';
 const FFPROBE = process.env.FFPROBE_PATH || ffprobeStatic?.path || 'ffprobe';
-
-const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || './media');
-const HLS_ROOT = path.join(MEDIA_ROOT, 'hls');
-fs.mkdirSync(HLS_ROOT, { recursive: true });
 
 // Catálogo de renditions (de menor a mayor). vbit/abit en kbps.
 const RENDITIONS = [
@@ -186,7 +183,8 @@ export function getTranscodeProgress() {
 async function processItem(item) {
   const table = item.kind === 'movie' ? 'media' : 'episodes';
   const key = `${item.kind}-${item.id}`;
-  const outDir = path.join(HLS_ROOT, key);
+  // El HLS se genera en el MISMO disco donde está el video de origen.
+  const outDir = hlsDirFor(key, item.videoPath);
 
   // --- Modo "sólo miniaturas": para contenido ya transcodificado que aún no
   //     tiene su sprite (backfill). No toca el estado ni re-transcodifica. ---
@@ -280,9 +278,11 @@ export function enqueueTranscode(item) {
   drain();
 }
 
-// Elimina los archivos HLS de un item (al borrar contenido).
+// Elimina los archivos HLS de un item (en cualquier disco).
 export function removeHls(kind, id) {
-  fs.rm(path.join(HLS_ROOT, `${kind}-${id}`), { recursive: true, force: true }, () => {});
+  for (const d of DISKS) {
+    fs.rm(path.join(d.path, 'hls', `${kind}-${id}`), { recursive: true, force: true }, () => {});
+  }
 }
 
 // ===========================================================================
@@ -312,7 +312,7 @@ export async function resumePendingTranscodes() {
 // ===========================================================================
 export async function backfillThumbnails() {
   const missing = (kind, key, videoPath, duration, id) => {
-    const vtt = path.join(HLS_ROOT, key, 'thumbnails.vtt');
+    const vtt = path.join(hlsDirFor(key, videoPath), 'thumbnails.vtt');
     if (videoPath && fs.existsSync(videoPath) && !fs.existsSync(vtt)) {
       enqueueTranscode({ kind, id, videoPath, duration, thumbsOnly: true });
       return true;
@@ -334,5 +334,3 @@ export async function backfillThumbnails() {
 
   if (n > 0) console.log(`[transcoder] generando miniaturas para ${n} título(s) existentes.`);
 }
-
-export { HLS_ROOT };

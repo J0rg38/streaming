@@ -13,14 +13,16 @@ import {
   Film, Clapperboard, ListPlus, UploadCloud, ArrowLeft, CheckCircle2,
   Library, Search, Trash2, ChevronDown, ChevronRight, Loader2, LogOut,
   Users, ShieldCheck, User as UserIcon, UserPlus, Pencil, X, Star,
+  HardDrive, Lock,
 } from 'lucide-react';
 import {
   uploadForm, fetchAdminSeries, fetchLibrary, fetchAdminMedia,
   deleteMedia, deleteEpisode, fetchUsers, deleteUser, updateUserRole,
   createUser, updateUser, fetchTranscodeProgress, setFeatured, updateMediaDetails,
+  fetchDisks,
 } from '../api.js';
 import { useAuth } from '../auth/AuthContext.jsx';
-import { formatMinutes } from '../utils/format.js';
+import { formatMinutes, formatBytes } from '../utils/format.js';
 
 // --- Lee la duración (segundos) de un archivo de video en el navegador -------
 // Usa un elemento <video> oculto para leer los metadatos sin subir nada.
@@ -39,6 +41,62 @@ function getVideoDuration(file) {
 
 const inputCls =
   'w-full rounded border border-gray-600 bg-card px-3 py-2 text-white placeholder-gray-500 focus:border-brand focus:outline-none';
+
+// --- Selector de disco de almacenamiento (con capacidad y espacio libre) -----
+function DiskPicker({ value, onChange }) {
+  const [disks, setDisks] = useState([]);
+
+  const load = () => fetchDisks().then((d) => {
+    setDisks(d);
+    if (d.length && !value) onChange(d[0].id); // selecciona el primero por defecto
+  }).catch(() => setDisks([]));
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  if (disks.length <= 1 && disks[0]) {
+    // Un solo disco: no hace falta selector, mostramos su espacio.
+    const d = disks[0];
+    const pct = d.total ? Math.round((d.used / d.total) * 100) : 0;
+    return (
+      <div className="rounded border border-gray-700 bg-card p-3">
+        <div className="mb-1 flex items-center gap-2 text-sm">
+          <HardDrive size={16} className="text-gray-400" />
+          <span className="font-medium">{d.label}</span>
+          <span className="ml-auto text-xs text-gray-400">
+            {formatBytes(d.free)} libres de {formatBytes(d.total)}
+          </span>
+        </div>
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-700">
+          <div className={`h-full ${pct > 90 ? 'bg-red-500' : 'bg-brand'}`} style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+    );
+  }
+
+  const selected = disks.find((d) => d.id === value) || disks[0];
+  const pct = selected?.total ? Math.round((selected.used / selected.total) * 100) : 0;
+
+  return (
+    <Field label="Disco de almacenamiento *">
+      <div className="space-y-2">
+        <select value={value || ''} onChange={(e) => onChange(e.target.value)} className={inputCls}>
+          {disks.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.label} — {formatBytes(d.free)} libres de {formatBytes(d.total)}
+            </option>
+          ))}
+        </select>
+        {selected && (
+          <div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-700">
+              <div className={`h-full ${pct > 90 ? 'bg-red-500' : 'bg-brand'}`} style={{ width: `${pct}%` }} />
+            </div>
+            <p className="mt-1 text-xs text-gray-500">{pct}% usado · {selected.path}</p>
+          </div>
+        )}
+      </div>
+    </Field>
+  );
+}
 
 function Field({ label, children }) {
   return (
@@ -119,6 +177,7 @@ function useUpload() {
 function MovieForm({ onDone }) {
   const { progress, status, run } = useUpload();
   const [reading, setReading] = useState(false);
+  const [disk, setDisk] = useState('');
 
   const onSubmit = async (e) => {
     e.preventDefault();
@@ -130,11 +189,12 @@ function MovieForm({ onDone }) {
       setReading(false);
       if (dur) fd.set('duration', String(Math.round(dur)));
     }
-    try { await run('/api/admin/movies', fd); e.target.reset(); onDone?.(); } catch { /* noop */ }
+    try { await run(`/api/admin/movies?disk=${disk}`, fd); e.target.reset(); onDone?.(); } catch { /* noop */ }
   };
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
+      <DiskPicker value={disk} onChange={setDisk} />
       <Field label="Título *"><input name="title" required className={inputCls} placeholder="Ej. Interestelar" /></Field>
       <Field label="Descripción"><textarea name="description" rows={3} className={inputCls} placeholder="Sinopsis…" /></Field>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -211,6 +271,7 @@ function SeriesForm({ onCreated }) {
 function EpisodeForm({ series, refreshSeries }) {
   const { progress, status, run } = useUpload();
   const [reading, setReading] = useState(false);
+  const [disk, setDisk] = useState('');
 
   // --- Búsqueda / selección de serie -------------------------------------
   const [query, setQuery] = useState('');
@@ -279,7 +340,7 @@ function EpisodeForm({ series, refreshSeries }) {
       }
     }
     try {
-      await run(`/api/admin/series/${selected.id}/episodes`, fd);
+      await run(`/api/admin/series/${selected.id}/episodes?disk=${disk}`, fd);
       form.title.value = ''; form.video.value = ''; form.duration.value = '';
       await reloadDetail();      // actualiza temporadas y sugerencia
       refreshSeries?.();
@@ -292,6 +353,7 @@ function EpisodeForm({ series, refreshSeries }) {
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
+      <DiskPicker value={disk} onChange={setDisk} />
       {/* -------- Buscador de serie -------- */}
       <Field label="Serie *">
         <div className="relative">
@@ -517,7 +579,7 @@ function MediaEditModal({ id, onClose, onSaved }) {
 // ===========================================================================
 //  Pestaña BIBLIOTECA: ver / filtrar / editar / eliminar.
 // ===========================================================================
-function LibraryManager() {
+function LibraryManager({ adult = false }) {
   const PAGE_SIZE = 12;
   const [data, setData] = useState({ items: [], total: 0, movieCount: 0, seriesCount: 0 });
   const [loading, setLoading] = useState(true);
@@ -538,11 +600,11 @@ function LibraryManager() {
 
   const load = () => {
     setLoading(true);
-    fetchLibrary({ page, pageSize: PAGE_SIZE, type, q: debouncedQ })
+    fetchLibrary({ page, pageSize: PAGE_SIZE, type, q: debouncedQ, adult })
       .then(setData).catch(console.error).finally(() => setLoading(false));
   };
-  // Recargamos cuando cambian página, filtro o búsqueda.
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [page, type, debouncedQ]);
+  // Recargamos cuando cambian página, filtro, búsqueda o sección (normal/+18).
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [page, type, debouncedQ, adult]);
 
   // Al cambiar de filtro, volvemos a la página 1.
   const changeType = (t) => { setType(t); setPage(1); };
@@ -934,49 +996,110 @@ export default function Admin() {
 
   const doLogout = async () => { await logout(); navigate('/login'); };
 
-  const tabs = [
-    { key: 'library', label: 'Biblioteca', icon: Library },
-    { key: 'movie',   label: 'Película',   icon: Film },
-    { key: 'series',  label: 'Serie',      icon: Clapperboard },
-    { key: 'episode', label: 'Capítulo',   icon: ListPlus },
-    { key: 'users',   label: 'Usuarios',   icon: Users },
+  // Navegación agrupada por secciones (se renderiza como sidebar en escritorio).
+  const groups = [
+    {
+      title: 'Contenido',
+      items: [
+        { key: 'library',   label: 'Biblioteca',    icon: Library },
+        { key: 'library18', label: 'Biblioteca +18', icon: Lock },
+      ],
+    },
+    {
+      title: 'Subir',
+      items: [
+        { key: 'movie',   label: 'Película', icon: Film },
+        { key: 'series',  label: 'Serie',    icon: Clapperboard },
+        { key: 'episode', label: 'Capítulo', icon: ListPlus },
+      ],
+    },
+    {
+      title: 'Sistema',
+      items: [
+        { key: 'users', label: 'Usuarios', icon: Users },
+      ],
+    },
   ];
+  const allTabs = groups.flatMap((g) => g.items);
+  const current = allTabs.find((t) => t.key === tab);
+  const CurrentIcon = current?.icon;
+
+  // Botón de navegación reutilizable (sidebar y móvil).
+  const NavButton = ({ item, mobile }) => {
+    const active = tab === item.key;
+    const Icon = item.icon;
+    return (
+      <button
+        onClick={() => setTab(item.key)}
+        className={mobile
+          ? `flex flex-shrink-0 items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium ${active ? 'bg-brand text-white' : 'bg-white/5 text-gray-300 hover:bg-white/10'}`
+          : `flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${active ? 'bg-brand text-white' : 'text-gray-300 hover:bg-white/10'}`}
+      >
+        <Icon size={18} /> {item.label}
+      </button>
+    );
+  };
+
+  const content = (
+    <>
+      {tab === 'library'   && <LibraryManager />}
+      {tab === 'library18' && <LibraryManager adult />}
+      {tab === 'movie'     && <MovieForm onDone={refreshSeries} />}
+      {tab === 'series'    && <SeriesForm onCreated={refreshSeries} />}
+      {tab === 'episode'   && <EpisodeForm series={series} refreshSeries={refreshSeries} />}
+      {tab === 'users'     && <UserManager />}
+    </>
+  );
 
   return (
-    <div className="mx-auto min-h-screen max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold sm:text-3xl">Panel de administración</h1>
-          <p className="text-sm text-gray-400">Sesión: {user?.name || user?.email}</p>
+    <div className="min-h-screen bg-surface">
+      {/* -------- Barra superior (ancho completo) -------- */}
+      <header className="flex items-center justify-between border-b border-gray-800 bg-black/40 px-4 py-3 sm:px-6">
+        <div className="flex items-center gap-3">
+          <span className="text-xl font-extrabold text-brand">MI VOD</span>
+          <span className="hidden text-sm text-gray-500 sm:inline">· Panel de administración</span>
         </div>
         <div className="flex items-center gap-3">
-          <Link to="/" className="flex items-center gap-1 text-sm text-gray-300 hover:text-white">
-            <ArrowLeft size={18} /> Catálogo
+          <span className="hidden text-sm text-gray-400 md:inline">{user?.name || user?.email}</span>
+          <Link to="/" className="flex items-center gap-1 rounded bg-white/10 px-3 py-1.5 text-sm hover:bg-white/20">
+            <ArrowLeft size={16} /> <span className="hidden sm:inline">Catálogo</span>
           </Link>
           <button onClick={doLogout} className="flex items-center gap-1 rounded bg-white/10 px-3 py-1.5 text-sm hover:bg-white/20">
-            <LogOut size={16} /> Salir
+            <LogOut size={16} /> <span className="hidden sm:inline">Salir</span>
           </button>
         </div>
+      </header>
+
+      {/* -------- Navegación móvil (horizontal) -------- */}
+      <div className="no-scrollbar flex gap-2 overflow-x-auto border-b border-gray-800 px-4 py-3 md:hidden">
+        {allTabs.map((item) => <NavButton key={item.key} item={item} mobile />)}
       </div>
 
-      {/* Pestañas: scroll horizontal en móvil para que no se amontonen */}
-      <div className="no-scrollbar mb-6 flex gap-1 overflow-x-auto border-b border-gray-700 sm:gap-2">
-        {tabs.map(({ key, label, icon: Icon }) => (
-          <button key={key} onClick={() => setTab(key)}
-            className={`flex flex-shrink-0 items-center gap-2 px-3 py-2 text-sm font-medium transition-colors sm:px-4 sm:text-base ${
-              tab === key ? 'border-b-2 border-brand text-white' : 'text-gray-400 hover:text-white'
-            }`}>
-            <Icon size={18} /> {label}
-          </button>
-        ))}
-      </div>
+      <div className="flex">
+        {/* -------- Sidebar (escritorio) -------- */}
+        <aside className="hidden w-60 flex-shrink-0 border-r border-gray-800 p-4 md:block">
+          <nav className="space-y-6">
+            {groups.map((g) => (
+              <div key={g.title}>
+                <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-gray-500">{g.title}</p>
+                <div className="space-y-1">
+                  {g.items.map((item) => <NavButton key={item.key} item={item} />)}
+                </div>
+              </div>
+            ))}
+          </nav>
+        </aside>
 
-      <div className="rounded-lg bg-black/30 p-4 sm:p-6">
-        {tab === 'library' && <LibraryManager />}
-        {tab === 'movie'   && <MovieForm onDone={refreshSeries} />}
-        {tab === 'series'  && <SeriesForm onCreated={refreshSeries} />}
-        {tab === 'episode' && <EpisodeForm series={series} refreshSeries={refreshSeries} />}
-        {tab === 'users'   && <UserManager />}
+        {/* -------- Contenido (ocupa el resto del ancho) -------- */}
+        <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">
+          <div className="mb-5 flex items-center gap-2">
+            {CurrentIcon && <CurrentIcon size={22} className="text-brand" />}
+            <h1 className="text-xl font-bold sm:text-2xl">{current?.label}</h1>
+          </div>
+          <div className="rounded-xl border border-gray-800 bg-black/20 p-4 sm:p-6">
+            {content}
+          </div>
+        </main>
       </div>
     </div>
   );

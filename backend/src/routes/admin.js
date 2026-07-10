@@ -18,20 +18,11 @@ import fs from 'fs';
 import path from 'path';
 import { query } from '../db.js';
 import { enqueueTranscode, removeHls, getTranscodeProgress } from '../transcoder.js';
+import { getDisk, listDisksUsage, DISKS } from '../storage.js';
 
 const router = Router();
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || './media');
-const MOVIES_DIR = path.join(MEDIA_ROOT, 'movies');
-const SERIES_DIR = path.join(MEDIA_ROOT, 'series');
-const IMAGES_DIR = path.join(MEDIA_ROOT, 'images');
-
-// Nos aseguramos de que las carpetas existan al arrancar.
-for (const dir of [MOVIES_DIR, SERIES_DIR, IMAGES_DIR]) {
-  fs.mkdirSync(dir, { recursive: true });
-}
 
 // Tamaño máximo por archivo de video, configurable con MAX_UPLOAD_GB.
 // Por defecto 50 GB para pruebas locales (ajústalo al pasar a producción).
@@ -57,41 +48,37 @@ const isAdultGenres = (genres) =>
   (genres || []).some((g) => ['adulto', 'adultos'].includes(String(g).trim().toLowerCase()));
 
 // ===========================================================================
-//  Multer — almacenamiento en disco.
+//  Multer — almacenamiento en disco. El disco destino se elige con ?disk=<id>
+//  (query param), disponible en las callbacks de destino.
 // ===========================================================================
 
-// Para PELÍCULAS: el video va a /movies, poster/banner a /images.
+// Crea (si no existe) y devuelve una subcarpeta dentro del disco elegido.
+const diskDir = (req, sub) => {
+  const dir = path.join(getDisk(req.query.disk).path, sub);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+};
+
+// Para PELÍCULAS: el video va a /movies, poster/banner a /images (del disco elegido).
 const movieStorage = multer.diskStorage({
-  destination: (_req, file, cb) => {
-    cb(null, file.fieldname === 'video' ? MOVIES_DIR : IMAGES_DIR);
-  },
+  destination: (req, file, cb) => cb(null, diskDir(req, file.fieldname === 'video' ? 'movies' : 'images')),
   filename: (_req, file, cb) => cb(null, uniqueName(file.originalname)),
 });
-const movieUpload = multer({
-  storage: movieStorage,
-  limits: { fileSize: MAX_FILE_SIZE }, // configurable con MAX_UPLOAD_GB
-});
+const movieUpload = multer({ storage: movieStorage, limits: { fileSize: MAX_FILE_SIZE } });
 
-// Para SERIES (metadatos): sólo imágenes (poster/banner) a /images.
+// Para SERIES/edición (metadatos): sólo imágenes (poster/banner) a /images.
 const imageStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, IMAGES_DIR),
+  destination: (req, _file, cb) => cb(null, diskDir(req, 'images')),
   filename: (_req, file, cb) => cb(null, uniqueName(file.originalname)),
 });
 const imageUpload = multer({ storage: imageStorage });
 
-// Para CAPÍTULOS: el video va a /series/<mediaId>/ (subcarpeta por serie).
+// Para CAPÍTULOS: el video va a /series/<mediaId>/ del disco elegido.
 const episodeStorage = multer.diskStorage({
-  destination: (req, _file, cb) => {
-    const dir = path.join(SERIES_DIR, String(req.params.id));
-    fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
+  destination: (req, _file, cb) => cb(null, diskDir(req, path.join('series', String(req.params.id)))),
   filename: (_req, file, cb) => cb(null, uniqueName(file.originalname)),
 });
-const episodeUpload = multer({
-  storage: episodeStorage,
-  limits: { fileSize: MAX_FILE_SIZE }, // configurable con MAX_UPLOAD_GB
-});
+const episodeUpload = multer({ storage: episodeStorage, limits: { fileSize: MAX_FILE_SIZE } });
 
 // URL pública para una imagen guardada (servida por express.static en /api/images).
 const imageUrl = (file) => (file ? `/api/images/${file.filename}` : null);
@@ -273,6 +260,18 @@ router.get('/series', async (_req, res) => {
 });
 
 // ===========================================================================
+//  GET /api/admin/disks — discos disponibles con capacidad y espacio libre.
+// ===========================================================================
+router.get('/disks', async (_req, res) => {
+  try {
+    res.json(await listDisksUsage());
+  } catch (err) {
+    console.error('[GET /api/admin/disks]', err);
+    res.status(500).json({ error: 'Error al leer los discos' });
+  }
+});
+
+// ===========================================================================
 //  GET /api/admin/transcode-progress — progreso en tiempo real (en memoria).
 //  Devuelve { 'movie-8': 42, 'episode-3': 87, ... } con lo que se procesa ahora.
 // ===========================================================================
@@ -295,14 +294,15 @@ router.get('/library', async (req, res) => {
   const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize) || 12));
   const offset = (page - 1) * pageSize;
   const type = ['movie', 'series'].includes(req.query.type) ? req.query.type : 'all';
+  const adult = req.query.adult === 'true'; // biblioteca normal (false) o +18 (true)
   const q = (req.query.q || '').trim();
   const like = `%${q}%`;
 
   try {
-    // Construimos el WHERE dinámico (tipo + búsqueda por título/género/actor).
-    const where = [];
-    const params = [];
-    let i = 1;
+    // Construimos el WHERE dinámico (adulto + tipo + búsqueda por título/género/actor).
+    const where = ['m.is_adult = $1'];
+    const params = [adult];
+    let i = 2;
     if (type !== 'all') { where.push(`m.type = $${i++}`); params.push(type); }
     if (q) {
       where.push(
@@ -313,15 +313,16 @@ router.get('/library', async (req, res) => {
       );
       params.push(like); i++;
     }
-    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const whereSql = `WHERE ${where.join(' AND ')}`;
 
     // Total que cumple el filtro (para la paginación).
     const { rows: cnt } = await query(`SELECT COUNT(*)::int AS total FROM media m ${whereSql}`, params);
     const total = cnt[0].total;
 
-    // Conteos globales por tipo (para los chips de filtro).
+    // Conteos por tipo dentro del contexto actual (normal o +18).
     const { rows: byType } = await query(
-      `SELECT type, COUNT(*)::int AS c FROM media GROUP BY type`
+      `SELECT type, COUNT(*)::int AS c FROM media WHERE is_adult = $1 GROUP BY type`,
+      [adult]
     );
     const movieCount = byType.find((r) => r.type === 'movie')?.c || 0;
     const seriesCount = byType.find((r) => r.type === 'series')?.c || 0;
@@ -642,8 +643,10 @@ router.delete('/media/:id', async (req, res) => {
     for (const p of paths) {
       fs.rm(p, { force: true }, () => {});
     }
-    // Carpeta de la serie, si existía.
-    fs.rm(path.join(SERIES_DIR, String(id)), { recursive: true, force: true }, () => {});
+    // Carpeta de la serie, si existía (en cualquier disco).
+    for (const d of DISKS) {
+      fs.rm(path.join(d.path, 'series', String(id)), { recursive: true, force: true }, () => {});
+    }
 
     // Borrado de los HLS asociados (película y cada capítulo).
     if (media[0].type === 'movie') removeHls('movie', id);

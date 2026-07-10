@@ -12,12 +12,9 @@
 import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
+import { isInsideAnyDisk } from '../storage.js';
 
 const router = Router();
-
-const MEDIA_ROOT = process.env.MEDIA_ROOT
-  ? path.resolve(process.env.MEDIA_ROOT)
-  : path.resolve('/');
 
 // Tipos MIME más comunes para video. Ajusta según tus formatos.
 const MIME = {
@@ -34,9 +31,10 @@ router.get('/', (req, res) => {
     return res.status(400).json({ error: 'Falta el parámetro path' });
   }
 
-  // Resolvemos la ruta absoluta y verificamos que quede dentro de MEDIA_ROOT.
+  // Resolvemos la ruta y verificamos que esté dentro de ALGÚN disco configurado
+  // (protección contra path traversal, p.ej. ?path=/etc/passwd).
   const absolute = path.resolve(requested);
-  if (MEDIA_ROOT !== path.resolve('/') && !absolute.startsWith(MEDIA_ROOT + path.sep)) {
+  if (!isInsideAnyDisk(absolute)) {
     return res.status(403).json({ error: 'Ruta fuera del directorio permitido' });
   }
 

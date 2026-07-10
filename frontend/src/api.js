@@ -94,9 +94,10 @@ export function uploadForm(url, formData, onProgress) {
   });
 }
 
+export const fetchDisks        = () => apiFetch(`${BASE}/admin/disks`);
 export const fetchAdminSeries  = () => apiFetch(`${BASE}/admin/series`);
-export const fetchLibrary      = ({ page = 1, pageSize = 12, type = 'all', q = '' } = {}) =>
-  apiFetch(`${BASE}/admin/library?page=${page}&pageSize=${pageSize}&type=${type}&q=${encodeURIComponent(q)}`);
+export const fetchLibrary      = ({ page = 1, pageSize = 12, type = 'all', q = '', adult = false } = {}) =>
+  apiFetch(`${BASE}/admin/library?page=${page}&pageSize=${pageSize}&type=${type}&q=${encodeURIComponent(q)}&adult=${adult}`);
 export const fetchTranscodeProgress = () => apiFetch(`${BASE}/admin/transcode-progress`);
 export const fetchAdminMedia   = (id) => apiFetch(`${BASE}/admin/media/${id}`);
 export const deleteMedia       = (id) => apiFetch(`${BASE}/admin/media/${id}`, { method: 'DELETE' });

@@ -15,11 +15,23 @@ import adminRouter    from './routes/admin.js';
 import authRouter     from './routes/auth.js';
 import { requireAuth, requireAdmin } from './middleware/auth.js';
 import { seedAdmin } from './seedAdmin.js';
-import { resumePendingTranscodes, backfillThumbnails, HLS_ROOT } from './transcoder.js';
+import { resumePendingTranscodes, backfillThumbnails } from './transcoder.js';
+import { DISKS, ensureDiskDirs } from './storage.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 4000;
-const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || './media');
+
+ensureDiskDirs(); // crea las subcarpetas en todos los discos configurados
+
+// Cabeceras para archivos HLS (playlists y segmentos).
+const hlsHeaders = (res, filePath) => {
+  if (filePath.endsWith('.m3u8')) {
+    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+  } else if (filePath.endsWith('.ts')) {
+    res.setHeader('Content-Type', 'video/mp2t');
+    res.setHeader('Cache-Control', 'public, max-age=31536000'); // los segmentos no cambian
+  }
+};
 
 // --- Seguridad de cabeceras HTTP (helmet) ----------------------------------
 // Desactivamos CSP y COEP aquí porque el frontend lo sirve Vite, y el video se
@@ -44,20 +56,15 @@ app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 app.use('/api/auth', authRouter);
 
 // --- Rutas protegidas: requieren usuario autenticado -----------------------
-// Imágenes (posters/banners): visibles sólo para usuarios logueados.
-app.use('/api/images', requireAuth, express.static(path.join(MEDIA_ROOT, 'images')));
-
-// HLS (playlists .m3u8 + segmentos .ts): streaming adaptativo, sólo autenticados.
-app.use('/api/hls', requireAuth, express.static(HLS_ROOT, {
-  setHeaders: (res, filePath) => {
-    if (filePath.endsWith('.m3u8')) {
-      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-    } else if (filePath.endsWith('.ts')) {
-      res.setHeader('Content-Type', 'video/mp2t');
-      res.setHeader('Cache-Control', 'public, max-age=31536000'); // los segmentos no cambian
-    }
-  },
-}));
+// Imágenes y HLS: montamos un static por CADA disco. Express prueba disco a
+// disco (fallthrough) hasta encontrar el archivo, así el contenido puede vivir
+// repartido en varios discos y servirse de forma transparente.
+app.use('/api/images', requireAuth);
+app.use('/api/hls',    requireAuth);
+for (const d of DISKS) {
+  app.use('/api/images', express.static(path.join(d.path, 'images')));
+  app.use('/api/hls',    express.static(path.join(d.path, 'hls'), { setHeaders: hlsHeaders }));
+}
 
 app.use('/api/media',    requireAuth, mediaRouter);
 app.use('/api/stream',   requireAuth, streamRouter);
