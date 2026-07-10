@@ -31,6 +31,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Normaliza el objeto de usuario que devolvemos al cliente (sin el hash).
 const publicUser = (u) => ({
   id: u.id, email: u.email, name: u.display_name, role: u.role,
+  adult: u.adult_access === true,
 });
 
 // ===========================================================================
@@ -79,7 +80,7 @@ router.post('/login', authLimiter, async (req, res) => {
 
   try {
     const { rows } = await query(
-      `SELECT id, email, password_hash, display_name, role
+      `SELECT id, email, password_hash, display_name, role, adult_access
          FROM users WHERE email = lower($1)`,
       [email]
     );
@@ -115,7 +116,10 @@ router.post('/logout', (_req, res) => {
 //  GET /api/auth/me  — devuelve el usuario de la sesión actual.
 // ===========================================================================
 router.get('/me', requireAuth, (req, res) => {
-  res.json({ user: { id: req.user.id, email: req.user.email, name: req.user.name, role: req.user.role } });
+  res.json({ user: {
+    id: req.user.id, email: req.user.email, name: req.user.name,
+    role: req.user.role, adult: req.user.adult === true,
+  } });
 });
 
 export default router;

@@ -52,6 +52,10 @@ const parseGenres = (raw) => {
   return raw.split(',').map((g) => g.trim()).filter(Boolean);
 };
 
+// ¿La lista de géneros marca el título como contenido para adultos?
+const isAdultGenres = (genres) =>
+  (genres || []).some((g) => ['adulto', 'adultos'].includes(String(g).trim().toLowerCase()));
+
 // ===========================================================================
 //  Multer — almacenamiento en disco.
 // ===========================================================================
@@ -117,22 +121,24 @@ router.post(
       const posterUrl = imageUrl(req.files?.poster?.[0]) || 'https://picsum.photos/seed/movie/300/450';
       const bannerUrl = imageUrl(req.files?.banner?.[0]) || posterUrl;
 
+      const genres = parseGenres(req.body.genres);
       const { rows } = await query(
         `INSERT INTO media (title, description, type, release_year, genres, actors, tags,
-                            poster_url, banner_url, video_path, duration)
-         VALUES ($1, $2, 'movie', $3, $4, $5, $6, $7, $8, $9, $10)
+                            poster_url, banner_url, video_path, duration, is_adult)
+         VALUES ($1, $2, 'movie', $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING id, title, type`,
         [
           title,
           description || null,
           release_year ? Number(release_year) : null,
-          parseGenres(req.body.genres),
+          genres,
           parseGenres(req.body.actors), // misma lógica: separados por coma
           parseGenres(req.body.tags),
           posterUrl,
           bannerUrl,
           videoFile.path, // ruta absoluta dentro de MEDIA_ROOT
           duration ? Math.round(Number(duration)) : null,
+          isAdultGenres(genres),
         ]
       );
 
@@ -166,20 +172,22 @@ router.post(
       const posterUrl = imageUrl(req.files?.poster?.[0]) || 'https://picsum.photos/seed/series/300/450';
       const bannerUrl = imageUrl(req.files?.banner?.[0]) || posterUrl;
 
+      const genres = parseGenres(req.body.genres);
       const { rows } = await query(
         `INSERT INTO media (title, description, type, release_year, genres, actors, tags,
-                            poster_url, banner_url, video_path)
-         VALUES ($1, $2, 'series', $3, $4, $5, $6, $7, $8, NULL)
+                            poster_url, banner_url, video_path, is_adult)
+         VALUES ($1, $2, 'series', $3, $4, $5, $6, $7, $8, NULL, $9)
          RETURNING id, title, type`,
         [
           title,
           description || null,
           release_year ? Number(release_year) : null,
-          parseGenres(req.body.genres),
+          genres,
           parseGenres(req.body.actors),
           parseGenres(req.body.tags),
           posterUrl,
           bannerUrl,
+          isAdultGenres(genres),
         ]
       );
 
@@ -385,7 +393,12 @@ router.patch(
       if (b.title !== undefined)        { sets.push(`title = $${i++}`); params.push(b.title); }
       if (b.description !== undefined)  { sets.push(`description = $${i++}`); params.push(b.description || null); }
       if (b.release_year !== undefined) { sets.push(`release_year = $${i++}`); params.push(b.release_year ? Number(b.release_year) : null); }
-      if (b.genres !== undefined)       { sets.push(`genres = $${i++}`); params.push(parseGenres(b.genres)); }
+      if (b.genres !== undefined) {
+        const genres = parseGenres(b.genres);
+        sets.push(`genres = $${i++}`); params.push(genres);
+        // Al cambiar los géneros, recalculamos si es contenido para adultos.
+        sets.push(`is_adult = $${i++}`); params.push(isAdultGenres(genres));
+      }
       if (b.actors !== undefined)       { sets.push(`actors = $${i++}`); params.push(parseGenres(b.actors)); }
       if (b.tags !== undefined)         { sets.push(`tags = $${i++}`); params.push(parseGenres(b.tags)); }
 
@@ -449,7 +462,7 @@ router.get('/media/:id', async (req, res) => {
 router.get('/users', async (_req, res) => {
   try {
     const { rows } = await query(
-      `SELECT id, email, display_name, role, created_at
+      `SELECT id, email, display_name, role, adult_access, created_at
          FROM users ORDER BY created_at DESC`
     );
     res.json(rows);
@@ -461,7 +474,7 @@ router.get('/users', async (_req, res) => {
 
 // POST /api/admin/users — crea un usuario (el admin define el rol).
 router.post('/users', async (req, res) => {
-  const { email, password, name, role } = req.body || {};
+  const { email, password, name, role, adult } = req.body || {};
 
   if (!EMAIL_RE.test(email || '')) {
     return res.status(400).json({ error: 'Email no válido' });
@@ -470,14 +483,15 @@ router.post('/users', async (req, res) => {
     return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
   }
   const finalRole = role === 'admin' ? 'admin' : 'user';
+  const adultAccess = adult === true || adult === 'true';
 
   try {
     const hash = await bcrypt.hash(password, 12);
     const { rows } = await query(
-      `INSERT INTO users (email, password_hash, display_name, role)
-       VALUES (lower($1), $2, $3, $4)
-       RETURNING id, email, display_name, role, created_at`,
-      [email, hash, name || null, finalRole]
+      `INSERT INTO users (email, password_hash, display_name, role, adult_access)
+       VALUES (lower($1), $2, $3, $4, $5)
+       RETURNING id, email, display_name, role, adult_access, created_at`,
+      [email, hash, name || null, finalRole, adultAccess]
     );
     res.status(201).json(rows[0]);
   } catch (err) {
@@ -521,6 +535,7 @@ router.patch('/users/:id', async (req, res) => {
     if (email !== undefined)          { sets.push(`email = lower($${i++})`); params.push(email); }
     if (name !== undefined)           { sets.push(`display_name = $${i++}`); params.push(name || null); }
     if (role !== undefined)           { sets.push(`role = $${i++}`);         params.push(role); }
+    if (req.body.adult !== undefined) { sets.push(`adult_access = $${i++}`);  params.push(req.body.adult === true || req.body.adult === 'true'); }
     if (password)                     { sets.push(`password_hash = $${i++}`); params.push(await bcrypt.hash(password, 12)); }
 
     if (sets.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
@@ -528,7 +543,7 @@ router.patch('/users/:id', async (req, res) => {
     params.push(id);
     const { rows } = await query(
       `UPDATE users SET ${sets.join(', ')} WHERE id = $${i}
-       RETURNING id, email, display_name, role, created_at`,
+       RETURNING id, email, display_name, role, adult_access, created_at`,
       params
     );
     res.json(rows[0]);

@@ -725,6 +725,7 @@ function UserFormModal({ user, currentUser, onClose, onSaved }) {
     email: user?.email || '',
     password: '',
     role: user?.role || 'user',
+    adult: user?.adult_access === true,
   });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -738,7 +739,7 @@ function UserFormModal({ user, currentUser, onClose, onSaved }) {
     setSaving(true);
     try {
       if (editing) {
-        const payload = { name: form.name, email: form.email, role: form.role };
+        const payload = { name: form.name, email: form.email, role: form.role, adult: form.adult };
         if (form.password) payload.password = form.password; // sólo si se escribió
         await updateUser(user.id, payload);
       } else {
@@ -779,6 +780,17 @@ function UserFormModal({ user, currentUser, onClose, onSaved }) {
             </select>
             {isSelf && <span className="mt-1 block text-xs text-gray-500">No puedes cambiar tu propio rol.</span>}
           </Field>
+
+          {/* Acceso a la sección de adultos */}
+          <label className="flex cursor-pointer items-center gap-2 rounded bg-black/30 px-3 py-2">
+            <input
+              type="checkbox"
+              checked={form.adult}
+              onChange={(e) => setForm({ ...form, adult: e.target.checked })}
+              className="h-4 w-4 accent-brand"
+            />
+            <span className="text-sm">Habilitar acceso a la <span className="font-semibold text-brand">sección de adultos (+18)</span></span>
+          </label>
 
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="rounded bg-white/10 px-4 py-2 text-sm hover:bg-white/20">Cancelar</button>
@@ -861,6 +873,7 @@ function UserManager() {
                 </p>
                 <p className="truncate text-xs text-gray-400">
                   {u.email} · <span className={isAdmin ? 'text-brand' : ''}>{isAdmin ? 'Administrador' : 'Usuario'}</span>
+                  {u.adult_access && <span className="ml-2 rounded bg-brand/20 px-1.5 py-0.5 text-[10px] font-medium text-brand">+18</span>}
                 </p>
               </div>
 

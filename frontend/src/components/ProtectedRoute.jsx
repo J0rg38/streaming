@@ -7,8 +7,8 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 
-export default function ProtectedRoute({ children, requireAdmin = false }) {
-  const { user, loading, isAdmin } = useAuth();
+export default function ProtectedRoute({ children, requireAdmin = false, requireAdult = false }) {
+  const { user, loading, isAdmin, canAdult } = useAuth();
   const location = useLocation();
 
   // Mientras comprobamos la sesión, evitamos parpadeos.
@@ -23,6 +23,11 @@ export default function ProtectedRoute({ children, requireAdmin = false }) {
 
   // Autenticado pero sin permisos de admin -> al catálogo.
   if (requireAdmin && !isAdmin) {
+    return <Navigate to="/" replace />;
+  }
+
+  // Sin acceso a la sección de adultos -> al catálogo.
+  if (requireAdult && !canAdult) {
     return <Navigate to="/" replace />;
   }
 

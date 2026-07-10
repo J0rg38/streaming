@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Play, Info, Settings, UploadCloud, LogOut, Search } from 'lucide-react';
+import { Play, Info, Settings, UploadCloud, LogOut, Search, Lock } from 'lucide-react';
 import { fetchCatalog } from '../api.js';
 import Carousel from '../components/Carousel.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
@@ -17,7 +17,7 @@ export default function Home() {
   const [heroIndex, setHeroIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
-  const { user, isAdmin, logout } = useAuth();
+  const { user, isAdmin, canAdult, logout } = useAuth();
 
   useEffect(() => {
     fetchCatalog()
@@ -71,6 +71,15 @@ export default function Home() {
         >
           <Search size={16} /> <span className="hidden sm:inline">Buscar</span>
         </Link>
+        {canAdult && (
+          <Link
+            to="/adultos"
+            className="flex items-center gap-2 rounded bg-brand/20 px-3 py-2 text-sm font-medium text-brand backdrop-blur hover:bg-brand/30 sm:px-4"
+            title="Sección para adultos"
+          >
+            <Lock size={16} /> <span className="hidden sm:inline">+18</span>
+          </Link>
+        )}
         <span className="hidden text-sm text-gray-300 md:inline">
           Hola, {user?.name || user?.email}
         </span>

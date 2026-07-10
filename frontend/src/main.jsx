@@ -6,6 +6,7 @@ import Home           from './pages/Home.jsx';
 import SeriesDetail   from './components/SeriesDetail.jsx';
 import MovieDetail    from './pages/MovieDetail.jsx';
 import Search         from './pages/Search.jsx';
+import AdultHome      from './pages/AdultHome.jsx';
 import PlayerPage     from './pages/PlayerPage.jsx';
 import Admin          from './pages/Admin.jsx';
 import Login          from './pages/Login.jsx';
@@ -21,6 +22,9 @@ import './index.css';
 const Protected = ({ children, admin = false }) => (
   <ProtectedRoute requireAdmin={admin}>{children}</ProtectedRoute>
 );
+const AdultOnly = ({ children }) => (
+  <ProtectedRoute requireAdult>{children}</ProtectedRoute>
+);
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -34,6 +38,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           {/* Requieren usuario autenticado */}
           <Route path="/"                     element={<Protected><Home /></Protected>} />
           <Route path="/search"               element={<Protected><Search /></Protected>} />
+          <Route path="/adultos"              element={<AdultOnly><AdultHome /></AdultOnly>} />
           <Route path="/movie/:id"            element={<Protected><MovieDetail /></Protected>} />
           <Route path="/series/:id"           element={<Protected><SeriesDetail /></Protected>} />
           <Route path="/watch/:mediaId"       element={<Protected><PlayerPage /></Protected>} />

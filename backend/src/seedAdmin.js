@@ -23,8 +23,8 @@ export async function seedAdmin() {
 
   const hash = await bcrypt.hash(password, 12);
   await query(
-    `INSERT INTO users (email, password_hash, display_name, role)
-     VALUES (lower($1), $2, $3, 'admin')`,
+    `INSERT INTO users (email, password_hash, display_name, role, adult_access)
+     VALUES (lower($1), $2, $3, 'admin', true)`,
     [email, hash, name]
   );
   console.log(`[seedAdmin] Admin creado: ${email}`);

@@ -7,6 +7,7 @@
 // ----------------------------------------------------------------------------
 import { Router } from 'express';
 import { query } from '../db.js';
+import { canAccessAdult } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -29,75 +30,87 @@ function buildProgress({ stopped_at, duration, episode }) {
 // ---------------------------------------------------------------------------
 //  GET /api/media  — catálogo con carruseles por género + progreso del usuario.
 // ---------------------------------------------------------------------------
+// Construye el catálogo (carruseles + progreso) para un usuario.
+//   adult=false -> sólo contenido normal (excluye adultos).
+//   adult=true  -> sólo contenido para adultos.
+async function buildCatalog(userId, adult) {
+  const { rows: media } = await query(
+    `SELECT id, title, description, type, release_year,
+            genres, poster_url, banner_url, video_path, duration, featured
+       FROM media
+      WHERE is_adult = $1
+      ORDER BY created_at DESC`,
+    [adult]
+  );
+
+  const { rows: progressRows } = await query(
+    `SELECT wp.media_id, wp.episode_id, wp.stopped_at, wp.updated_at,
+            COALESCE(e.duration, m.duration) AS duration,
+            e.season_number, e.episode_number
+       FROM watch_progress wp
+       JOIN media m ON m.id = wp.media_id
+       LEFT JOIN episodes e ON e.id = wp.episode_id
+      WHERE wp.user_id = $1
+      ORDER BY wp.updated_at DESC`,
+    [userId]
+  );
+
+  const latestByMedia = new Map();
+  for (const p of progressRows) {
+    if (!latestByMedia.has(p.media_id)) latestByMedia.set(p.media_id, p);
+  }
+
+  const enriched = media.map((item) => {
+    const p = latestByMedia.get(item.id);
+    const progress = p
+      ? buildProgress({
+          stopped_at: p.stopped_at,
+          duration: p.duration,
+          episode: p.episode_id
+            ? { season_number: p.season_number, episode_number: p.episode_number }
+            : null,
+        })
+      : null;
+    return { ...item, progress };
+  });
+
+  const continueWatching = enriched
+    .filter((m) => m.progress && (m.progress.percent === null || m.progress.percent < 95))
+    .slice(0, 20);
+  const recentlyAdded = enriched.slice(0, 15);
+  const featured = enriched.filter((m) => m.featured);
+
+  const byGenre = {};
+  for (const item of enriched) {
+    const genres = item.genres?.length ? item.genres : ['Otros'];
+    for (const g of genres) (byGenre[g] ||= []).push(item);
+  }
+  const rails = Object.entries(byGenre).map(([genre, items]) => ({ genre, items }));
+
+  return { continueWatching, recentlyAdded, featured, rails, all: enriched };
+}
+
 router.get('/', async (req, res) => {
-  const userId = req.user.id;
   try {
-    const { rows: media } = await query(
-      `SELECT id, title, description, type, release_year,
-              genres, poster_url, banner_url, video_path, duration, featured
-         FROM media
-        ORDER BY created_at DESC`
-    );
-
-    // Progreso del usuario: una fila por película/capítulo, con la duración
-    // correspondiente (la del capítulo en series, la de la película en films).
-    const { rows: progressRows } = await query(
-      `SELECT wp.media_id, wp.episode_id, wp.stopped_at, wp.updated_at,
-              COALESCE(e.duration, m.duration) AS duration,
-              e.season_number, e.episode_number
-         FROM watch_progress wp
-         JOIN media m ON m.id = wp.media_id
-         LEFT JOIN episodes e ON e.id = wp.episode_id
-        WHERE wp.user_id = $1
-        ORDER BY wp.updated_at DESC`,
-      [userId]
-    );
-
-    // Para cada media, tomamos la fila de progreso más reciente (la primera,
-    // porque vienen ordenadas DESC por updated_at).
-    const latestByMedia = new Map();
-    for (const p of progressRows) {
-      if (!latestByMedia.has(p.media_id)) latestByMedia.set(p.media_id, p);
-    }
-
-    const enrich = (item) => {
-      const p = latestByMedia.get(item.id);
-      const progress = p
-        ? buildProgress({
-            stopped_at: p.stopped_at,
-            duration: p.duration,
-            episode: p.episode_id
-              ? { season_number: p.season_number, episode_number: p.episode_number }
-              : null,
-          })
-        : null;
-      return { ...item, progress };
-    };
-
-    const enriched = media.map(enrich);
-
-    // Fila especial "Continuar viendo": títulos con progreso sin terminar.
-    const continueWatching = enriched
-      .filter((m) => m.progress && (m.progress.percent === null || m.progress.percent < 95))
-      .slice(0, 20);
-
-    // "Recién añadidos": los más nuevos (ya vienen ordenados por created_at DESC).
-    const recentlyAdded = enriched.slice(0, 15);
-
-    // "Estelares": los marcados como destacados por el admin.
-    const featured = enriched.filter((m) => m.featured);
-
-    // Carruseles por género.
-    const byGenre = {};
-    for (const item of enriched) {
-      const genres = item.genres?.length ? item.genres : ['Otros'];
-      for (const g of genres) (byGenre[g] ||= []).push(item);
-    }
-    const rails = Object.entries(byGenre).map(([genre, items]) => ({ genre, items }));
-
-    res.json({ continueWatching, recentlyAdded, featured, rails, all: enriched });
+    res.json(await buildCatalog(req.user.id, false)); // catálogo normal (sin adultos)
   } catch (err) {
     console.error('[GET /api/media]', err);
+    res.status(500).json({ error: 'Error al obtener el catálogo' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+//  GET /api/media/adult — catálogo EXCLUSIVO de la sección de adultos.
+//  Sólo accesible por usuarios con acceso concedido (o administradores).
+// ---------------------------------------------------------------------------
+router.get('/adult', async (req, res) => {
+  if (!canAccessAdult(req.user)) {
+    return res.status(403).json({ error: 'No tienes acceso a esta sección' });
+  }
+  try {
+    res.json(await buildCatalog(req.user.id, true));
+  } catch (err) {
+    console.error('[GET /api/media/adult]', err);
     res.status(500).json({ error: 'Error al obtener el catálogo' });
   }
 });
@@ -127,14 +140,15 @@ router.get('/search', async (req, res) => {
                 similarity(lower(coalesce(description, '')), lower($1)) * 0.5
               ) AS score
          FROM media
-        WHERE title ILIKE $2
+        WHERE is_adult = false      -- el contenido adulto sólo vive en su sección
+          AND (title ILIKE $2
            OR EXISTS (SELECT 1 FROM unnest(genres) g WHERE g ILIKE $2)
            OR EXISTS (SELECT 1 FROM unnest(actors) a WHERE a ILIKE $2)
            OR EXISTS (SELECT 1 FROM unnest(tags)   t WHERE t ILIKE $2)
            OR similarity(lower(title), lower($1)) > 0.25
            OR similarity(lower(coalesce(array_to_string(actors, ' '), '')), lower($1)) > 0.25
            OR similarity(lower(coalesce(array_to_string(genres, ' '), '')), lower($1)) > 0.30
-           OR similarity(lower(coalesce(array_to_string(tags,   ' '), '')), lower($1)) > 0.30
+           OR similarity(lower(coalesce(array_to_string(tags,   ' '), '')), lower($1)) > 0.30)
         ORDER BY title_match DESC, score DESC, created_at DESC
         LIMIT 40`,
       [q, like]
@@ -158,10 +172,11 @@ router.get('/:id/similar', async (req, res) => {
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'id inválido' });
 
   try {
-    const { rows: base } = await query(`SELECT genres FROM media WHERE id = $1`, [id]);
+    const { rows: base } = await query(`SELECT genres, is_adult FROM media WHERE id = $1`, [id]);
     if (base.length === 0) return res.status(404).json({ error: 'No encontrado' });
 
     const genres = base[0].genres || [];
+    const adult = base[0].is_adult; // los similares comparten la naturaleza (normal/adulto)
 
     // Buscamos otros títulos que compartan algún género (operador && de arrays).
     // Si el título no tiene géneros, devolvemos los más recientes como fallback.
@@ -169,18 +184,18 @@ router.get('/:id/similar', async (req, res) => {
       ? await query(
           `SELECT id, title, type, poster_url, banner_url, duration, genres, release_year
              FROM media
-            WHERE id <> $1 AND genres && $2::text[]
+            WHERE id <> $1 AND is_adult = $3 AND genres && $2::text[]
             ORDER BY created_at DESC
             LIMIT 12`,
-          [id, genres]
+          [id, genres, adult]
         )
       : await query(
           `SELECT id, title, type, poster_url, banner_url, duration, genres, release_year
              FROM media
-            WHERE id <> $1
+            WHERE id <> $1 AND is_adult = $2
             ORDER BY created_at DESC
             LIMIT 12`,
-          [id]
+          [id, adult]
         );
 
     res.json(rows);
@@ -202,13 +217,18 @@ router.get('/:id', async (req, res) => {
     const { rows } = await query(
       `SELECT id, title, description, type, release_year,
               genres, actors, poster_url, banner_url, video_path, duration,
-              transcode_status, hls_master
+              transcode_status, hls_master, is_adult
          FROM media WHERE id = $1`,
       [id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Título no encontrado' });
 
     const media = rows[0];
+
+    // El contenido para adultos sólo lo pueden ver usuarios con acceso.
+    if (media.is_adult && !canAccessAdult(req.user)) {
+      return res.status(403).json({ error: 'No tienes acceso a este contenido' });
+    }
 
     // URL del WebVTT de miniaturas (derivada del master HLS).
     const thumbsFromMaster = (m) => (m ? m.replace('master.m3u8', 'thumbnails.vtt') : null);

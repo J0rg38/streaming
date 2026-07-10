@@ -25,6 +25,7 @@ CREATE TABLE users (
     display_name  VARCHAR(120),
     role          VARCHAR(10)  NOT NULL DEFAULT 'user'
                     CHECK (role IN ('user', 'admin')),
+    adult_access  BOOLEAN      NOT NULL DEFAULT false, -- acceso a la sección de adultos
     created_at    TIMESTAMP    NOT NULL DEFAULT NOW()
 );
 CREATE INDEX idx_users_email ON users(lower(email));
@@ -43,6 +44,7 @@ CREATE TABLE media (
     genres       TEXT[]       DEFAULT '{}',      -- p.ej. {'Acción','Drama'}
     actors       TEXT[]       NOT NULL DEFAULT '{}', -- reparto (para búsqueda)
     tags         TEXT[]       NOT NULL DEFAULT '{}', -- etiquetas libres (alias, nombre en inglés…)
+    is_adult     BOOLEAN      NOT NULL DEFAULT false, -- contenido para adultos (sección exclusiva)
     poster_url   TEXT,                            -- imagen vertical (carrusel)
     banner_url   TEXT,                            -- imagen horizontal (hero)
     video_path   TEXT,                            -- SOLO se llena si type='movie'

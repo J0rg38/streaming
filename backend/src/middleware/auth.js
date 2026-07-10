@@ -16,7 +16,10 @@ const COOKIE_NAME = 'vod_token';
 // Firma un token con los datos mínimos del usuario.
 export function signToken(user) {
   return jwt.sign(
-    { id: user.id, email: user.email, role: user.role, name: user.display_name },
+    {
+      id: user.id, email: user.email, role: user.role,
+      name: user.display_name, adult: user.adult_access === true,
+    },
     JWT_SECRET,
     { expiresIn: JWT_EXPIRES }
   );
@@ -71,3 +74,6 @@ export function requireAdmin(req, res, next) {
   req.user = payload;
   next();
 }
+
+// ¿El usuario puede ver contenido para adultos? (flag o administrador)
+export const canAccessAdult = (user) => user?.adult === true || user?.role === 'admin';
