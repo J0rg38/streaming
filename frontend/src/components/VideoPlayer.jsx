@@ -85,8 +85,9 @@ export default function VideoPlayer({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [speed, setSpeed] = useState(1);
 
-  // --- Menús ---
+  // --- Menús / controles ---
   const [showSettings, setShowSettings] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(true);
 
   // --- Calidad (HLS) ---
   const [levels, setLevels] = useState([]);
@@ -106,6 +107,8 @@ export default function VideoPlayer({
   const bufferingRef = useRef(true);
   const skipTimerRef = useRef(null);
   const skipNonce = useRef(0);
+  const hideTimerRef = useRef(null);        // temporizador para ocultar controles
+  const overControlsRef = useRef(false);    // el cursor está sobre las barras
 
   const setBufferingBoth = (v) => { bufferingRef.current = v; setBuffering(v); };
 
@@ -211,21 +214,48 @@ export default function VideoPlayer({
   }, [thumbnailsUrl]);
 
   // ==========================================================================
-  //  Visibilidad de los controles: se resuelve con CSS :hover (group-hover),
-  //  que el navegador aplica de forma 100% fiable según la POSICIÓN del cursor,
-  //  sin depender de eventos JS (mousemove) que en algunos monitores/videos no
-  //  se disparan bien. Los controles se muestran mientras el cursor está sobre
-  //  el reproductor (o en pausa/carga/fin). Ver `controlsCls` más abajo.
+  //  Visibilidad de los controles (JS): se muestran con la actividad del ratón
+  //  y se ocultan tras 3s de inactividad (salvo pausa, carga o cursor sobre los
+  //  controles). Funciona en pantalla completa porque el contenedor ahora llena
+  //  TODA la pantalla (regla CSS [data-player]:fullscreen), así el ratón siempre
+  //  está sobre él y sus eventos se disparan de forma fiable.
   // ==========================================================================
+  const showControls = useCallback(() => {
+    setControlsVisible(true);
+    clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = setTimeout(() => {
+      const v = videoRef.current;
+      if (v && !v.paused && !bufferingRef.current && !overControlsRef.current) {
+        setControlsVisible(false);
+      }
+    }, 3000);
+  }, []);
+
+  // En pausa o cargando, controles siempre visibles.
   useEffect(() => {
+    if (!playing || buffering) { clearTimeout(hideTimerRef.current); setControlsVisible(true); }
+    else showControls();
+  }, [playing, buffering, showControls]);
+
+  // Actividad del ratón/teclado a nivel de documento + estado de pantalla completa.
+  useEffect(() => {
+    const wake = () => showControls();
+    document.addEventListener('mousemove', wake);
+    document.addEventListener('pointermove', wake);
+    document.addEventListener('touchstart', wake, { passive: true });
+    document.addEventListener('keydown', wake);
     const onFs = () => setIsFullscreen(!!isFsElement());
     document.addEventListener('fullscreenchange', onFs);
     document.addEventListener('webkitfullscreenchange', onFs);
     return () => {
+      document.removeEventListener('mousemove', wake);
+      document.removeEventListener('pointermove', wake);
+      document.removeEventListener('touchstart', wake);
+      document.removeEventListener('keydown', wake);
       document.removeEventListener('fullscreenchange', onFs);
       document.removeEventListener('webkitfullscreenchange', onFs);
     };
-  }, []);
+  }, [showControls]);
 
   // ==========================================================================
   //  Handlers de reproducción
@@ -332,21 +362,19 @@ export default function VideoPlayer({
   // Estilo que fuerza la capa por encima del overlay de hardware del video.
   const overlayLayer = { transform: 'translateZ(0)', willChange: 'opacity' };
 
-  // Visibilidad SÓLO con CSS: mientras el cursor esté sobre el reproductor
-  // (group-hover) o esté en pausa/carga/fin. El navegador aplica :hover según la
-  // posición del cursor, así que es 100% fiable (no depende de eventos JS que en
-  // algunos monitores/videos no se disparan).
-  const forceControls = !playing || buffering || showEndScreen;
+  // Visibilidad por estado JS (mostrar con actividad, ocultar por inactividad).
   const controlsCls = `transition-opacity duration-300 ${
-    forceControls
-      ? 'opacity-100'
-      : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto'
+    controlsVisible ? 'opacity-100' : 'pointer-events-none opacity-0'
   }`;
 
   return (
     <div
       ref={containerRef}
-      className="group relative h-full w-full select-none bg-black"
+      data-player
+      className={`relative h-full w-full select-none bg-black ${controlsVisible ? '' : 'cursor-none'}`}
+      onMouseMove={showControls}
+      onPointerMove={showControls}
+      onTouchStart={showControls}
     >
       {/* Video: object-contain -> correcto en cualquier relación de aspecto. */}
       <video
@@ -422,6 +450,8 @@ export default function VideoPlayer({
       <div
         className={`absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/85 via-black/40 to-transparent px-3 pb-3 pt-12 sm:px-4 sm:pb-4 ${controlsCls}`}
         style={overlayLayer}
+        onMouseEnter={() => { overControlsRef.current = true; setControlsVisible(true); }}
+        onMouseLeave={() => { overControlsRef.current = false; }}
       >
         {/* Barra de progreso con buffer + preview de miniaturas */}
         <div
