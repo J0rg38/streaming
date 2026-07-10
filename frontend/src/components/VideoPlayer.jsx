@@ -64,7 +64,6 @@ export default function VideoPlayer({
 }) {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
-  const hideTimerRef = useRef(null); // temporizador para ocultar los controles
   const skipTimerRef = useRef(null); // temporizador del indicador de salto
   const skipNonce = useRef(0);
   const bufferingRef = useRef(true); // espejo de `buffering` para leer en timers
@@ -251,48 +250,55 @@ export default function VideoPlayer({
     skipTimerRef.current = setTimeout(() => setSkipHint(null), 650);
   };
 
-  // --- Mostrar controles y programar su ocultado tras 3s de inactividad ----
+  // --- Visibilidad de los controles: sistema robusto por "última actividad" --
+  //  Marcamos la última interacción y un intervalo decide cuándo ocultar. Es
+  //  mucho más fiable en pantalla completa (cualquier monitor/resolución) que
+  //  depender de un único evento o de un setTimeout que se puede desincronizar.
+  const lastActivityRef = useRef(Date.now());
   const showControlsTemporarily = useCallback(() => {
+    lastActivityRef.current = Date.now();
     setShowControls(true);
-    clearTimeout(hideTimerRef.current);
-    hideTimerRef.current = setTimeout(() => {
-      const v = videoRef.current;
-      // Ocultamos SÓLO si está reproduciendo y no está cargando (buffering).
-      // Así los controles no parpadean cuando el video está esperando datos.
-      if (v && !v.paused && !bufferingRef.current) setShowControls(false);
-    }, 3000);
   }, []);
 
-  // Detecta actividad a nivel de DOCUMENTO con pointer events. Esto es
-  // independiente del tamaño/relación de aspecto de la pantalla y del monitor:
-  // funciona igual en 16:9, 16:10, ultrawide, monitores externos, etc. (donde
-  // los listeners atados a un elemento concreto podían fallar en pantalla
-  // completa por el letterbox / bandas negras).
+  // Intervalo que oculta los controles tras 3s de inactividad (salvo pausa/carga).
+  useEffect(() => {
+    const id = setInterval(() => {
+      const v = videoRef.current;
+      if (!v) return;
+      if (v.paused || bufferingRef.current) return; // no ocultar en pausa/buffering
+      if (Date.now() - lastActivityRef.current > 3000) {
+        setShowControls((s) => (s ? false : s));
+      }
+    }, 500);
+    return () => clearInterval(id);
+  }, []);
+
+  // Escucha de actividad. Usamos MOUSEMOVE y POINTERMOVE (algunos entornos en
+  // pantalla completa disparan uno pero no el otro), en document y window, para
+  // que los controles reaparezcan al mover el ratón en CUALQUIER pantalla.
   useEffect(() => {
     const wake = () => showControlsTemporarily();
-    document.addEventListener('pointermove', wake);
-    document.addEventListener('pointerdown', wake);
-    document.addEventListener('keydown', wake);
+    const events = ['mousemove', 'pointermove', 'mousedown', 'pointerdown', 'touchstart', 'keydown'];
+    for (const ev of events) {
+      document.addEventListener(ev, wake, { passive: true });
+      window.addEventListener(ev, wake, { passive: true });
+    }
     document.addEventListener('fullscreenchange', wake);
     document.addEventListener('webkitfullscreenchange', wake);
     return () => {
-      document.removeEventListener('pointermove', wake);
-      document.removeEventListener('pointerdown', wake);
-      document.removeEventListener('keydown', wake);
+      for (const ev of events) {
+        document.removeEventListener(ev, wake);
+        window.removeEventListener(ev, wake);
+      }
       document.removeEventListener('fullscreenchange', wake);
       document.removeEventListener('webkitfullscreenchange', wake);
     };
   }, [showControlsTemporarily]);
 
-  // Si el video se pausa, mostramos los controles de forma permanente.
+  // Con el video en pausa, los controles quedan visibles de forma permanente.
   useEffect(() => {
-    if (!playing) {
-      clearTimeout(hideTimerRef.current);
-      setShowControls(true);
-    } else {
-      showControlsTemporarily();
-    }
-    return () => clearTimeout(hideTimerRef.current);
+    if (!playing) setShowControls(true);
+    else showControlsTemporarily();
   }, [playing, showControlsTemporarily]);
 
   // --- Atajos de teclado ---------------------------------------------------
@@ -391,6 +397,8 @@ export default function VideoPlayer({
     <div
       ref={containerRef}
       className={`relative h-full w-full bg-black ${showControls ? '' : 'cursor-none'}`}
+      onMouseMove={showControlsTemporarily}
+      onPointerMove={showControlsTemporarily}
     >
       {/* La fuente (HLS o MP4) la asigna el efecto de configuración.
           object-contain evita que el video se deforme en pantalla completa. */}
@@ -457,6 +465,7 @@ export default function VideoPlayer({
           <div
             className="relative mb-2"
             onMouseMove={(e) => {
+              showControlsTemporarily(); // mantener controles visibles al usar la barra
               if (!cues.length || !duration || !spriteUrl) return;
               const rect = e.currentTarget.getBoundingClientRect();
               const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));

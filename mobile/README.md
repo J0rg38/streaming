@@ -33,19 +33,39 @@ npx expo start -c        # -c limpia la caché
 - Escanea el QR con **Expo Go** (Android), o pulsa **a** para abrir en un emulador.
 
 ## ⚠️ Si Expo Go da error al escanear el QR
-1. **"Project is incompatible with this version of Expo Go"** → tu proyecto usa un
-   SDK más antiguo que tu Expo Go. Solución: `npx expo install expo@latest` y luego
-   `npx expo install --fix`. Vuelve a arrancar con `npx expo start -c`.
-2. **Se queda cargando / "Something went wrong" / timeout** → el teléfono no llega
-   al bundler por la red. Prueba el modo túnel (no depende de la LAN):
-   ```bash
-   npx expo start --tunnel
-   ```
-   (La primera vez instala `@expo/ngrok`; acepta.)
-3. **El móvil y el PC deben estar en la misma WiFi** (salvo con `--tunnel`).
-4. Comprueba que el backend es accesible desde el móvil: abre en el navegador del
-   teléfono `http://TU_IP:4000/api/health` — debe responder `{"status":"ok"}`.
-5. Si nada funciona, ejecuta `npx expo-doctor` y revisa lo que reporte.
+
+### "Failed to download remote update" (java.io.IOException)
+Es el caso más común. Expo Go **no pudo descargar el bundle** desde tu PC. Aunque
+estén en la misma WiFi, en **macOS** casi siempre lo bloquea el **firewall del Mac**
+o el **aislamiento de clientes (AP isolation)** del router. Solución definitiva —
+usar el **modo túnel**, que no depende de la red local:
+```bash
+cd mobile
+npx expo start --tunnel -c
+```
+La primera vez instala `@expo/ngrok` (acepta). Espera a que diga "Tunnel ready" y
+escanea el QR nuevo. Necesita internet en el PC y el móvil (ya lo tienes).
+
+Alternativas si no quieres túnel:
+- **Permite el firewall del Mac**: Ajustes del sistema → Red → Firewall → permitir
+  conexiones entrantes para **node** (o desactívalo temporalmente para probar).
+- **Comprueba acceso**: abre en el navegador del móvil `http://TU_IP_PC:8081` —
+  si no carga, es firewall/red (usa `--tunnel`).
+
+### "Project is incompatible with this version of Expo Go"
+Tu proyecto usa un SDK distinto al de tu Expo Go (el tuyo es **SDK 54**). Alinea:
+```bash
+cd mobile
+rm -rf node_modules package-lock.json
+npm install
+npx expo install --fix
+npx expo start --tunnel -c
+```
+
+### Otros
+- Mira la terminal donde corre `expo start`: si hay un error rojo de *bundling*,
+  ese es el problema real (pásamelo).
+- `npx expo-doctor` reporta incompatibilidades de versiones.
 
 ## Pantallas incluidas
 - **Login** — con tu cuenta de la web.
