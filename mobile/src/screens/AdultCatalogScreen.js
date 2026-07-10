@@ -31,29 +31,29 @@ export default function AdultCatalogScreen({ navigation }) {
   ];
 
   return (
-    <FlatList
-      style={{ backgroundColor: '#000' }}
-      ListHeaderComponent={
-        <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Text style={styles.back}>‹ Volver</Text>
-          </TouchableOpacity>
-          <View style={styles.badge}><Text style={styles.badgeTxt}>+18</Text></View>
-        </View>
-      }
-      ListEmptyComponent={
-        <Text style={styles.empty}>Aún no hay contenido en esta sección.</Text>
-      }
-      data={sections}
-      keyExtractor={(s) => s.key}
-      renderItem={({ item }) => <Rail title={item.title} items={item.items} onPress={openTitle} />}
-    />
+    <View style={{ flex: 1, backgroundColor: '#000' }}>
+      {/* Barra superior FIJA */}
+      <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Text style={styles.back}>‹ Volver</Text>
+        </TouchableOpacity>
+        <View style={styles.badge}><Text style={styles.badgeTxt}>+18</Text></View>
+      </View>
+
+      <FlatList
+        contentContainerStyle={{ paddingTop: 12 }}
+        ListEmptyComponent={<Text style={styles.empty}>Aún no hay contenido en esta sección.</Text>}
+        data={sections}
+        keyExtractor={(s) => s.key}
+        renderItem={({ item }) => <Rail title={item.title} items={item.items} onPress={openTitle} />}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   center: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(227,83,54,0.25)', marginBottom: 12 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(227,83,54,0.25)', backgroundColor: '#000', zIndex: 10, elevation: 4 },
   back: { color: '#ddd', fontSize: 16 },
   badge: { backgroundColor: '#E35336', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 3 },
   badgeTxt: { color: '#fff', fontWeight: '800', fontSize: 13 },

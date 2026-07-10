@@ -24,6 +24,10 @@ import EndScreen from './EndScreen.jsx';
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
+// Refuerzo de volumen: el <video> HTML topa en 100%. Con un GainNode de Web
+// Audio amplificamos por encima de eso para que el volumen base se oiga fuerte.
+const VOLUME_BOOST = 1.6;
+
 function fmt(t) {
   if (!Number.isFinite(t)) return '0:00';
   const h = Math.floor(t / 3600);
@@ -69,6 +73,8 @@ export default function VideoPlayer({
   const skipNonce = useRef(0);
   const hideTimerRef = useRef(null);
   const overControlsRef = useRef(false);
+  const audioCtxRef = useRef(null);
+  const gainRef = useRef(null);
 
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -91,6 +97,26 @@ export default function VideoPlayer({
   const [showEndScreen, setShowEndScreen] = useState(false);
 
   const setBuf = (v) => { bufferingRef.current = v; setBuffering(v); };
+
+  // --- Refuerzo de volumen (Web Audio) --------------------------------------
+  // Se crea una sola vez, tras el primer play (requiere gesto del usuario). El
+  // audio del <video> pasa por un GainNode que lo amplifica por encima del 100%.
+  const ensureAudioBoost = useCallback(() => {
+    const v = videoRef.current;
+    if (!v || audioCtxRef.current) return;
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      const src = ctx.createMediaElementSource(v);
+      const gain = ctx.createGain();
+      gain.gain.value = VOLUME_BOOST;
+      src.connect(gain).connect(ctx.destination);
+      audioCtxRef.current = ctx;
+      gainRef.current = gain;
+    } catch { /* si falla, se mantiene el audio normal del <video> */ }
+  }, []);
+  useEffect(() => () => { audioCtxRef.current?.close?.(); }, []);
 
   // --- Mostrar controles y ocultar tras 3s de inactividad (estilo Netflix) --
   const bumpControls = useCallback(() => {
@@ -270,7 +296,7 @@ export default function VideoPlayer({
         onTimeUpdate={onTimeUpdate}
         onProgress={onTimeUpdate}
         onLoadedMetadata={onLoadedMeta}
-        onPlay={() => setPlaying(true)}
+        onPlay={() => { setPlaying(true); ensureAudioBoost(); audioCtxRef.current?.resume?.(); }}
         onPause={() => setPlaying(false)}
         onEnded={handleEnded}
         onWaiting={() => setBuf(true)}

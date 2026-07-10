@@ -7,15 +7,30 @@
 //  soporta búsqueda por rangos.
 // ----------------------------------------------------------------------------
 import { useEffect, useRef, useState } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, TouchableOpacity, Text, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { fetchMedia, streamUrl, authHeaders, fetchProgress, saveProgress } from '../api';
 
-export default function PlayerScreen({ route }) {
+export default function PlayerScreen({ route, navigation }) {
   const { mediaId, episodeId } = route.params;
+  const insets = useSafeAreaInsets();
   const [source, setSource] = useState(null);
+  const [showBack, setShowBack] = useState(true);
   const startAt = useRef(0);
   const lastPos = useRef(0);
+  const hideTimer = useRef(null);
+
+  // Muestra el botón y programa su auto-ocultado (como los controles nativos).
+  const bumpBack = () => {
+    setShowBack(true);
+    clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => setShowBack(false), 3500);
+  };
+  useEffect(() => {
+    bumpBack();
+    return () => clearTimeout(hideTimer.current);
+  }, []);
 
   // Resolvemos la ruta del video y el punto donde reanudar.
   useEffect(() => {
@@ -37,6 +52,7 @@ export default function PlayerScreen({ route }) {
   // Crea el reproductor cuando ya hay fuente. Reanuda y reproduce.
   const player = useVideoPlayer(source, (p) => {
     if (!source) return;
+    p.volume = 1.0; // volumen al máximo por defecto
     if (startAt.current > 0) p.currentTime = startAt.current;
     p.play();
   });
@@ -54,8 +70,22 @@ export default function PlayerScreen({ route }) {
     };
   }, [player, mediaId, episodeId]);
 
+  // Al salir: guarda el progreso actual y vuelve atrás.
+  const goBack = () => {
+    const t = player?.currentTime || 0;
+    if (t > 0) saveProgress(mediaId, episodeId, t);
+    navigation.goBack();
+  };
+
   if (!source) {
-    return <View style={styles.center}><ActivityIndicator color="#E35336" size="large" /></View>;
+    return (
+      <View style={styles.center}>
+        <TouchableOpacity style={[styles.back, { top: insets.top + 10 }]} onPress={() => navigation.goBack()}>
+          <Text style={styles.backTxt}>‹</Text>
+        </TouchableOpacity>
+        <ActivityIndicator color="#E35336" size="large" />
+      </View>
+    );
   }
 
   return (
@@ -67,6 +97,24 @@ export default function PlayerScreen({ route }) {
         allowsFullscreen
         contentFit="contain"
       />
+
+      {/* Zona táctil superior: al tocar, reaparece el botón (los controles
+          nativos aparecen al tocar el centro/abajo del video). */}
+      <TouchableOpacity
+        activeOpacity={1}
+        style={styles.tapZone}
+        onPress={bumpBack}
+      />
+
+      {showBack && (
+        <TouchableOpacity
+          style={[styles.back, { top: insets.top + 10 }]}
+          onPress={goBack}
+          hitSlop={12}
+        >
+          <Text style={styles.backTxt}>‹</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -74,4 +122,12 @@ export default function PlayerScreen({ route }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   center: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
+  tapZone: { position: 'absolute', top: 0, left: 0, right: 0, height: 90, zIndex: 15 },
+  back: {
+    position: 'absolute', left: 14, zIndex: 20,
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  backTxt: { color: '#fff', fontSize: 30, lineHeight: 32, marginTop: -2, fontWeight: '600' },
 });
