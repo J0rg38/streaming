@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { useAuth } from '../auth';
+import Logo from '../components/Logo';
 
 export default function LoginScreen() {
   const { signIn } = useAuth();
@@ -21,6 +22,7 @@ export default function LoginScreen() {
 
   return (
     <View style={styles.container}>
+      <Logo height={56} />
       <Text style={styles.logo}>MI VOD</Text>
       <Text style={styles.subtitle}>Inicia sesión para ver tu contenido</Text>
 
@@ -44,7 +46,7 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#141414', justifyContent: 'center', padding: 24 },
-  logo: { color: '#E35336', fontSize: 34, fontWeight: '800' },
+  logo: { color: '#E35336', fontSize: 34, fontWeight: '800', marginTop: 12 },
   subtitle: { color: '#aaa', marginBottom: 24, marginTop: 4 },
   input: { backgroundColor: '#1f1f1f', color: '#fff', borderRadius: 8, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: '#333' },
   button: { backgroundColor: '#E35336', borderRadius: 8, padding: 15, alignItems: 'center', marginTop: 8 },

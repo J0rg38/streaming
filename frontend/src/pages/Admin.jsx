@@ -1141,7 +1141,8 @@ export default function Admin() {
     <div className="min-h-screen bg-surface">
       {/* -------- Barra superior (ancho completo) -------- */}
       <header className="flex items-center justify-between border-b border-gray-800 bg-black/40 px-4 py-3 sm:px-6">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          <img src="/logo.svg" alt="Mi VOD" className="h-7 w-auto" />
           <span className="text-xl font-extrabold text-brand">MI VOD</span>
           <span className="hidden text-sm text-gray-500 sm:inline">· Panel de administración</span>
         </div>

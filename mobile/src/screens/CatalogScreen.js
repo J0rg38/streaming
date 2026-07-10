@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { View, Text, FlatList, Image, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { fetchCatalog, imageSource } from '../api';
 import { useAuth } from '../auth';
+import Logo from '../components/Logo';
 
 function Poster({ item, onPress }) {
   return (
@@ -53,7 +54,10 @@ export default function CatalogScreen({ navigation }) {
       style={{ backgroundColor: '#141414' }}
       ListHeaderComponent={
         <View style={styles.header}>
-          <Text style={styles.logo}>MI VOD</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Logo height={28} />
+            <Text style={styles.logo}>MI VOD</Text>
+          </View>
           <View style={{ flexDirection: 'row', gap: 16 }}>
             <TouchableOpacity onPress={() => navigation.navigate('Search')}><Text style={styles.link}>Buscar</Text></TouchableOpacity>
             <TouchableOpacity onPress={signOut}><Text style={styles.link}>Salir</Text></TouchableOpacity>

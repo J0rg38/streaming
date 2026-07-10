@@ -47,18 +47,20 @@ export const saveProgress = (mediaId, episodeId, stoppedAt) =>
   }).catch(() => {});
 
 // --- Helpers de URLs con auth ---
-// URL de streaming progresivo (un solo request con rangos: fiable con headers).
-export const streamUrl = (videoPath) =>
-  `${API_BASE}/api/stream?path=${encodeURIComponent(videoPath)}`;
+// El token va en la URL (?token=) porque <Image> y algunos reproductores nativos
+// no envían cabeceras de forma fiable en Android.
+const withToken = (url) => (authToken ? `${url}${url.includes('?') ? '&' : '?'}token=${authToken}` : url);
 
-// Fuente de imagen: nuestras imágenes requieren auth (cabecera). Las externas no.
+// URL de streaming progresivo (un solo request con rangos).
+export const streamUrl = (videoPath) =>
+  withToken(`${API_BASE}/api/stream?path=${encodeURIComponent(videoPath)}`);
+
+// Fuente de imagen: nuestras imágenes requieren auth (token en la URL). Las externas no.
 export const imageSource = (url) => {
   if (!url) return undefined;
-  if (url.startsWith('/api/')) {
-    return { uri: `${API_BASE}${url}`, headers: authToken ? { Authorization: `Bearer ${authToken}` } : {} };
-  }
+  if (url.startsWith('/api/')) return { uri: withToken(`${API_BASE}${url}`) };
   return { uri: url }; // URL externa (p.ej. placeholder)
 };
 
-// Cabeceras para el reproductor (Bearer token).
+// Cabeceras para el reproductor (Bearer token) — por si el player las soporta.
 export const authHeaders = () => (authToken ? { Authorization: `Bearer ${authToken}` } : {});

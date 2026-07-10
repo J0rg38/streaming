@@ -1,0 +1,10 @@
+<svg viewBox="0 0 400 240" xmlns="http://www.w3.org/2000/svg">
+  <!-- Triángulo de play (esquinas redondeadas) -->
+  <path d="M185 48 L346 120 L185 192 Z"
+        fill="#E35336" stroke="#E35336" stroke-width="34" stroke-linejoin="round"/>
+  <!-- Líneas de velocidad -->
+  <path d="M30 146 C96 112 136 112 170 129" fill="none"
+        stroke="#E35336" stroke-width="22" stroke-linecap="round"/>
+  <path d="M50 192 C106 166 141 164 170 176" fill="none"
+        stroke="#E35336" stroke-width="22" stroke-linecap="round"/>
+</svg>

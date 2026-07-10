@@ -41,14 +41,16 @@ export function clearAuthCookie(res) {
   res.clearCookie(COOKIE_NAME, { path: '/' });
 }
 
-// Lee y valida el token. Acepta la cookie (web) o la cabecera
-// Authorization: Bearer <token> (app móvil). Devuelve el payload o null.
+// Lee y valida el token. Acepta la cookie (web), la cabecera
+// Authorization: Bearer <token> (app móvil) o ?token= en la URL (para <Image>
+// y reproductores nativos que no envían cabeceras de forma fiable).
 function readToken(req) {
   let token = req.cookies?.[COOKIE_NAME];
   if (!token) {
     const auth = req.headers.authorization || '';
     if (auth.startsWith('Bearer ')) token = auth.slice(7);
   }
+  if (!token && req.query) token = req.query.token || req.query.access_token || null;
   if (!token) return null;
   try {
     return jwt.verify(token, JWT_SECRET);

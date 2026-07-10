@@ -65,7 +65,10 @@ export default function Home() {
   // a los administradores.
   const Navbar = () => (
     <nav className="fixed top-0 z-30 flex w-full items-center justify-between bg-gradient-to-b from-black/80 to-transparent px-4 py-3 sm:px-8 sm:py-4">
-      <Link to="/" className="text-xl font-extrabold text-brand sm:text-2xl">MI VOD</Link>
+      <Link to="/" className="flex items-center gap-2">
+        <img src="/logo.svg" alt="Mi VOD" className="h-7 w-auto sm:h-9" />
+        <span className="text-xl font-extrabold text-brand sm:text-2xl">MI VOD</span>
+      </Link>
       <div className="flex items-center gap-2 sm:gap-3">
         <Link
           to="/search"

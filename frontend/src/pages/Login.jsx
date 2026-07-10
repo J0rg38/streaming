@@ -41,6 +41,7 @@ export default function Login() {
   return (
     <div className="grid min-h-screen place-items-center bg-surface px-4">
       <div className="w-full max-w-md rounded-xl bg-black/50 p-8 shadow-2xl backdrop-blur">
+        <img src="/logo.svg" alt="Mi VOD" className="mb-3 h-12 w-auto" />
         <h1 className="mb-1 text-3xl font-extrabold text-brand">MI VOD</h1>
         <p className="mb-6 text-gray-400">Inicia sesión para continuar</p>
 

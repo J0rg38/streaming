@@ -25,6 +25,15 @@ rm -rf node_modules package-lock.json
 npm install --legacy-peer-deps    # instala aunque haya conflicto de "peers"
 npx expo install --fix            # corrige TODAS las versiones a las del SDK 54
 ```
+
+> Incluye `react-native-svg` (para el logo). `expo install --fix` deja su versión correcta.
+
+## Icono de la app (APK)
+El logo dentro de la app ya se muestra. Para el **icono del APK** (el que sale en el
+teléfono), Expo necesita un PNG cuadrado de 1024×1024:
+1. Guarda el logo como `mobile/assets/icon.png` (1024×1024, fondo a tu gusto).
+2. En `app.json`, dentro de `"android"`, añade: `"adaptiveIcon": { "foregroundImage": "./assets/icon.png", "backgroundColor": "#141414" }` y arriba `"icon": "./assets/icon.png"`.
+3. Al compilar con EAS Build se usará ese icono.
 > `expo install --fix` es la clave: ajusta react, react-native, react-native-screens,
 > safe-area-context, expo-video y demás a las versiones **exactas** compatibles con
 > el SDK 54, resolviendo cualquier conflicto.
