@@ -28,7 +28,6 @@ import {
 import { fetchProgress, saveProgress } from '../api.js';
 import EndScreen from './EndScreen.jsx';
 
-const HIDE_AFTER_MS = 3500;   // inactividad antes de ocultar controles
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 // Segundos -> "mm:ss" / "h:mm:ss".
@@ -86,8 +85,7 @@ export default function VideoPlayer({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [speed, setSpeed] = useState(1);
 
-  // --- Controles / menús ---
-  const [controlsVisible, setControlsVisible] = useState(true);
+  // --- Menús ---
   const [showSettings, setShowSettings] = useState(false);
 
   // --- Calidad (HLS) ---
@@ -104,11 +102,8 @@ export default function VideoPlayer({
   const [skipHint, setSkipHint] = useState(null);
   const [showEndScreen, setShowEndScreen] = useState(false);
 
-  // --- Refs auxiliares (para leer en timers sin closures obsoletas) ---
+  // --- Refs auxiliares ---
   const bufferingRef = useRef(true);
-  const endScreenRef = useRef(false);
-  const pointerOverControlsRef = useRef(false);
-  const hideAtRef = useRef(Date.now() + HIDE_AFTER_MS);
   const skipTimerRef = useRef(null);
   const skipNonce = useRef(0);
 
@@ -124,7 +119,7 @@ export default function VideoPlayer({
 
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
     setLevels([]); setSelectedLevel(-1);
-    setShowEndScreen(false); endScreenRef.current = false;
+    setShowEndScreen(false);
     setBufferingBoth(true);
 
     const tryPlay = () => { v.play().catch(() => {}); };
@@ -216,44 +211,21 @@ export default function VideoPlayer({
   }, [thumbnailsUrl]);
 
   // ==========================================================================
-  //  Visibilidad de los controles
+  //  Visibilidad de los controles: se resuelve con CSS :hover (group-hover),
+  //  que el navegador aplica de forma 100% fiable según la POSICIÓN del cursor,
+  //  sin depender de eventos JS (mousemove) que en algunos monitores/videos no
+  //  se disparan bien. Los controles se muestran mientras el cursor está sobre
+  //  el reproductor (o en pausa/carga/fin). Ver `controlsCls` más abajo.
   // ==========================================================================
-  const wakeControls = useCallback(() => {
-    hideAtRef.current = Date.now() + HIDE_AFTER_MS;
-    setControlsVisible(true);
-  }, []);
-
-  // Bucle único que decide cuándo ocultar (robusto y sin depender de un evento).
   useEffect(() => {
-    const id = setInterval(() => {
-      const v = videoRef.current;
-      const keepOpen = !v || v.paused || bufferingRef.current
-        || pointerOverControlsRef.current || endScreenRef.current || showSettings;
-      if (!keepOpen && Date.now() > hideAtRef.current) {
-        setControlsVisible((s) => (s ? false : s));
-      }
-    }, 250);
-    return () => clearInterval(id);
-  }, [showSettings]);
-
-  // Actividad redundante a nivel de documento (mousemove Y pointermove: algunos
-  // entornos en pantalla completa disparan uno pero no el otro).
-  useEffect(() => {
-    const wake = () => wakeControls();
-    const evts = ['mousemove', 'pointermove', 'mousedown', 'pointerdown', 'touchstart', 'keydown'];
-    for (const ev of evts) document.addEventListener(ev, wake, { passive: true });
-    const onFs = () => { setIsFullscreen(!!isFsElement()); wakeControls(); };
+    const onFs = () => setIsFullscreen(!!isFsElement());
     document.addEventListener('fullscreenchange', onFs);
     document.addEventListener('webkitfullscreenchange', onFs);
     return () => {
-      for (const ev of evts) document.removeEventListener(ev, wake);
       document.removeEventListener('fullscreenchange', onFs);
       document.removeEventListener('webkitfullscreenchange', onFs);
     };
-  }, [wakeControls]);
-
-  // En pausa, controles siempre visibles.
-  useEffect(() => { if (!playing) { setControlsVisible(true); } else wakeControls(); }, [playing, wakeControls]);
+  }, []);
 
   // ==========================================================================
   //  Handlers de reproducción
@@ -262,7 +234,6 @@ export default function VideoPlayer({
     const v = videoRef.current;
     if (!v) return;
     if (v.paused) v.play(); else { v.pause(); persist(); }
-    wakeControls();
   };
 
   const onTimeUpdate = () => {
@@ -291,7 +262,6 @@ export default function VideoPlayer({
     setSkipHint({ dir: delta < 0 ? -1 : 1, secs: Math.abs(delta), nonce: (skipNonce.current += 1) });
     clearTimeout(skipTimerRef.current);
     skipTimerRef.current = setTimeout(() => setSkipHint(null), 650);
-    wakeControls();
   };
 
   const changeVolume = (value) => {
@@ -321,14 +291,13 @@ export default function VideoPlayer({
     const el = containerRef.current;
     if (!isFsElement()) (el?.requestFullscreen || el?.webkitRequestFullscreen)?.call(el);
     else (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
-    wakeControls();
   };
 
-  const handleEnded = () => { persist(); endScreenRef.current = true; setShowEndScreen(true); };
+  const handleEnded = () => { persist(); setShowEndScreen(true); };
   const handleReplay = () => {
     const v = videoRef.current;
     if (v) { v.currentTime = 0; v.play(); }
-    endScreenRef.current = false; setShowEndScreen(false);
+    setShowEndScreen(false);
   };
 
   // ==========================================================================
@@ -348,12 +317,11 @@ export default function VideoPlayer({
         case 'm': toggleMute(); break;
         default: break;
       }
-      wakeControls();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wakeControls]);
+  }, []);
 
   const progressPct = duration ? (current / duration) * 100 : 0;
   const bufferedPct = duration ? Math.min(100, (bufferedEnd / duration) * 100) : 0;
@@ -363,20 +331,24 @@ export default function VideoPlayer({
 
   // Estilo que fuerza la capa por encima del overlay de hardware del video.
   const overlayLayer = { transform: 'translateZ(0)', willChange: 'opacity' };
-  const controlsCls = `transition-opacity duration-300 ${controlsVisible ? 'opacity-100' : 'pointer-events-none opacity-0'}`;
+
+  // Visibilidad SÓLO con CSS: mientras el cursor esté sobre el reproductor
+  // (group-hover) o esté en pausa/carga/fin. El navegador aplica :hover según la
+  // posición del cursor, así que es 100% fiable (no depende de eventos JS que en
+  // algunos monitores/videos no se disparan).
+  const forceControls = !playing || buffering || showEndScreen;
+  const controlsCls = `transition-opacity duration-300 ${
+    forceControls
+      ? 'opacity-100'
+      : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto'
+  }`;
 
   return (
     <div
       ref={containerRef}
-      className={`relative h-full w-full select-none bg-black ${controlsVisible ? '' : 'cursor-none'}`}
-      onMouseMove={wakeControls}
-      onPointerMove={wakeControls}
-      onTouchStart={wakeControls}
+      className="group relative h-full w-full select-none bg-black"
     >
-      {/* Video: object-contain -> se ve correcto en cualquier relación de aspecto.
-          pointer-events-none: los eventos de ratón los gestiona la CAPA DE
-          INTERACCIÓN de abajo (un div fiable), no el elemento <video> — que en
-          algunos monitores/compositores no entrega bien los eventos. */}
+      {/* Video: object-contain -> correcto en cualquier relación de aspecto. */}
       <video
         ref={videoRef}
         className="pointer-events-none h-full w-full object-contain"
@@ -386,7 +358,7 @@ export default function VideoPlayer({
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={handleEnded}
-        onWaiting={() => { setBufferingBoth(true); wakeControls(); }}
+        onWaiting={() => setBufferingBoth(true)}
         onStalled={() => setBufferingBoth(true)}
         onSeeking={() => setBufferingBoth(true)}
         onCanPlay={() => setBufferingBoth(false)}
@@ -395,19 +367,8 @@ export default function VideoPlayer({
         autoPlay
       />
 
-      {/* Capa de interacción: un div SIEMPRE fiable por encima del video. Capta
-          el movimiento del ratón (para mostrar controles) y el clic (play/pausa)
-          sin depender de los eventos del elemento <video>. Queda por DEBAJO de
-          las barras de control (que van después en el DOM), así esas siguen
-          siendo clicables. */}
-      <div
-        className="absolute inset-0"
-        style={overlayLayer}
-        onClick={togglePlay}
-        onMouseMove={wakeControls}
-        onPointerMove={wakeControls}
-        onTouchStart={wakeControls}
-      />
+      {/* Capa de clic para play/pausa sobre el área del video (un div fiable). */}
+      <div className="absolute inset-0" style={overlayLayer} onClick={togglePlay} />
 
       {/* Spinner de carga */}
       {buffering && !showEndScreen && (
@@ -461,14 +422,11 @@ export default function VideoPlayer({
       <div
         className={`absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/85 via-black/40 to-transparent px-3 pb-3 pt-12 sm:px-4 sm:pb-4 ${controlsCls}`}
         style={overlayLayer}
-        onMouseEnter={() => { pointerOverControlsRef.current = true; }}
-        onMouseLeave={() => { pointerOverControlsRef.current = false; }}
       >
         {/* Barra de progreso con buffer + preview de miniaturas */}
         <div
           className="relative mb-2"
           onMouseMove={(e) => {
-            wakeControls();
             if (!cues.length || !duration || !spriteUrl) return;
             const rect = e.currentTarget.getBoundingClientRect();
             const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
