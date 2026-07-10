@@ -13,6 +13,6 @@
     "android": {
       "package": "com.mivod.app"
     },
-    "plugins": ["expo-secure-store"]
+    "plugins": ["expo-secure-store", "expo-video"]
   }
 }

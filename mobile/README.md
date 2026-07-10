@@ -15,21 +15,37 @@ Edita `src/config.js` y pon la URL de tu backend:
   El teléfono y el PC deben estar en la **misma red WiFi**.
 - **Producción**: `https://test.cisne.com.pe`.
 
-## 2. Instalar dependencias
+## 2. Instalar dependencias (SDK más reciente)
+> Expo Go de la Play Store SÓLO abre proyectos del **SDK más reciente**. Por eso
+> instalamos el Expo actual y alineamos el resto de paquetes automáticamente.
 ```bash
 cd mobile
+rm -rf node_modules package-lock.json
 npm install
-# Alinea las versiones nativas con tu versión de Expo:
-npx expo install expo-av expo-secure-store expo-status-bar \
-  react-native-screens react-native-safe-area-context \
-  @react-navigation/native @react-navigation/native-stack
+# Alinea react-native, expo-* y demás con el SDK instalado:
+npx expo install --fix
 ```
 
 ## 3. Arrancar
 ```bash
-npx expo start
+npx expo start -c        # -c limpia la caché
 ```
 - Escanea el QR con **Expo Go** (Android), o pulsa **a** para abrir en un emulador.
+
+## ⚠️ Si Expo Go da error al escanear el QR
+1. **"Project is incompatible with this version of Expo Go"** → tu proyecto usa un
+   SDK más antiguo que tu Expo Go. Solución: `npx expo install expo@latest` y luego
+   `npx expo install --fix`. Vuelve a arrancar con `npx expo start -c`.
+2. **Se queda cargando / "Something went wrong" / timeout** → el teléfono no llega
+   al bundler por la red. Prueba el modo túnel (no depende de la LAN):
+   ```bash
+   npx expo start --tunnel
+   ```
+   (La primera vez instala `@expo/ngrok`; acepta.)
+3. **El móvil y el PC deben estar en la misma WiFi** (salvo con `--tunnel`).
+4. Comprueba que el backend es accesible desde el móvil: abre en el navegador del
+   teléfono `http://TU_IP:4000/api/health` — debe responder `{"status":"ok"}`.
+5. Si nada funciona, ejecuta `npx expo-doctor` y revisa lo que reporte.
 
 ## Pantallas incluidas
 - **Login** — con tu cuenta de la web.

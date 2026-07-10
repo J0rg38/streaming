@@ -3,3 +3,10 @@ dist/
 .env
 *.log
 .DS_Store
+
+# Archivos multimedia subidos (viven en el servidor, no en git)
+backend/media/
+
+# App móvil
+mobile/node_modules/
+mobile/.expo/
