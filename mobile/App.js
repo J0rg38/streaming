@@ -3,11 +3,13 @@
 // ----------------------------------------------------------------------------
 import { View, ActivityIndicator } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { AuthProvider, useAuth } from './src/auth';
 import LoginScreen from './src/screens/LoginScreen';
 import CatalogScreen from './src/screens/CatalogScreen';
+import AdultCatalogScreen from './src/screens/AdultCatalogScreen';
 import TitleScreen from './src/screens/TitleScreen';
 import PlayerScreen from './src/screens/PlayerScreen';
 import SearchScreen from './src/screens/SearchScreen';
@@ -35,6 +37,7 @@ function Routes() {
       ) : (
         <>
           <Stack.Screen name="Catalog" component={CatalogScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="Adult" component={AdultCatalogScreen} options={{ headerShown: false }} />
           <Stack.Screen name="Title" component={TitleScreen} options={{ title: '' }} />
           <Stack.Screen name="Search" component={SearchScreen} options={{ title: 'Buscar' }} />
           <Stack.Screen name="Player" component={PlayerScreen} options={{ headerShown: false, orientation: 'landscape' }} />
@@ -46,11 +49,13 @@ function Routes() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <NavigationContainer theme={theme}>
-        <StatusBar style="light" />
-        <Routes />
-      </NavigationContainer>
-    </AuthProvider>
+    <SafeAreaProvider>
+      <AuthProvider>
+        <NavigationContainer theme={theme}>
+          <StatusBar style="light" />
+          <Routes />
+        </NavigationContainer>
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }

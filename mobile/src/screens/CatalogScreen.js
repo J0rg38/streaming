@@ -2,37 +2,16 @@
 //  CatalogScreen — catálogo con carruseles (estilo Netflix) por género.
 // ----------------------------------------------------------------------------
 import { useEffect, useState } from 'react';
-import { View, Text, FlatList, Image, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
-import { fetchCatalog, imageSource } from '../api';
+import { View, Text, FlatList, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { fetchCatalog } from '../api';
 import { useAuth } from '../auth';
 import Logo from '../components/Logo';
-
-function Poster({ item, onPress }) {
-  return (
-    <TouchableOpacity style={styles.card} onPress={() => onPress(item)}>
-      <Image source={imageSource(item.poster_url)} style={styles.poster} />
-      <Text numberOfLines={1} style={styles.cardTitle}>{item.title}</Text>
-    </TouchableOpacity>
-  );
-}
-
-function Rail({ title, items, onPress }) {
-  if (!items?.length) return null;
-  return (
-    <View style={{ marginBottom: 20 }}>
-      <Text style={styles.railTitle}>{title}</Text>
-      <FlatList
-        horizontal data={items} keyExtractor={(m) => String(m.id)}
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 12 }}
-        renderItem={({ item }) => <Poster item={item} onPress={onPress} />}
-      />
-    </View>
-  );
-}
+import Rail from '../components/Rail';
 
 export default function CatalogScreen({ navigation }) {
-  const { signOut } = useAuth();
+  const { user, signOut } = useAuth();
+  const insets = useSafeAreaInsets();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -53,13 +32,18 @@ export default function CatalogScreen({ navigation }) {
     <FlatList
       style={{ backgroundColor: '#141414' }}
       ListHeaderComponent={
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Logo height={28} />
+            <Logo height={26} />
             <Text style={styles.logo}>MI VOD</Text>
           </View>
-          <View style={{ flexDirection: 'row', gap: 16 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
             <TouchableOpacity onPress={() => navigation.navigate('Search')}><Text style={styles.link}>Buscar</Text></TouchableOpacity>
+            {user?.adult && (
+              <TouchableOpacity onPress={() => navigation.navigate('Adult')} style={styles.adultBtn}>
+                <Text style={styles.adultTxt}>+18</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity onPress={signOut}><Text style={styles.link}>Salir</Text></TouchableOpacity>
           </View>
         </View>
@@ -78,11 +62,9 @@ export default function CatalogScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   center: { flex: 1, backgroundColor: '#141414', justifyContent: 'center', alignItems: 'center' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, paddingTop: 24 },
-  logo: { color: '#E35336', fontSize: 24, fontWeight: '800' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 14 },
+  logo: { color: '#E35336', fontSize: 22, fontWeight: '800' },
   link: { color: '#ddd', fontSize: 15 },
-  railTitle: { color: '#fff', fontSize: 18, fontWeight: '700', marginLeft: 12, marginBottom: 8 },
-  card: { width: 120, marginRight: 10 },
-  poster: { width: 120, height: 180, borderRadius: 8, backgroundColor: '#222' },
-  cardTitle: { color: '#ccc', fontSize: 12, marginTop: 4 },
+  adultBtn: { backgroundColor: 'rgba(227,83,54,0.2)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 3 },
+  adultTxt: { color: '#E35336', fontSize: 13, fontWeight: '700' },
 });
