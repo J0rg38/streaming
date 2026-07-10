@@ -18,7 +18,8 @@ import fs from 'fs';
 import path from 'path';
 import { query } from '../db.js';
 import { enqueueTranscode, removeHls, getTranscodeProgress } from '../transcoder.js';
-import { getDisk, listDisksUsage, DISKS } from '../storage.js';
+import { getDisk, listDisksUsage, DISKS, diskForPath } from '../storage.js';
+import { canAccessAdult } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -82,6 +83,16 @@ const episodeUpload = multer({ storage: episodeStorage, limits: { fileSize: MAX_
 
 // URL pública para una imagen guardada (servida por express.static en /api/images).
 const imageUrl = (file) => (file ? `/api/images/${file.filename}` : null);
+
+// Borra un archivo de imagen (póster/banner) subido, de todos los discos.
+// Sólo actúa sobre imágenes servidas por nosotros (/api/images/...), no URLs externas.
+const removeImageByUrl = (url) => {
+  if (!url || !url.startsWith('/api/images/')) return;
+  const name = path.basename(url);
+  for (const d of DISKS) {
+    fs.rm(path.join(d.path, 'images', name), { force: true }, () => {});
+  }
+};
 
 // ===========================================================================
 //  POST /api/admin/movies  — crea una película y sube su archivo de video.
@@ -298,6 +309,11 @@ router.get('/library', async (req, res) => {
   const q = (req.query.q || '').trim();
   const like = `%${q}%`;
 
+  // La biblioteca +18 sólo la gestiona quien tenga acceso adulto (aunque sea admin).
+  if (adult && !canAccessAdult(req.user)) {
+    return res.status(403).json({ error: 'No tienes acceso a la sección de adultos' });
+  }
+
   try {
     // Construimos el WHERE dinámico (adulto + tipo + búsqueda por título/género/actor).
     const where = ['m.is_adult = $1'];
@@ -327,12 +343,17 @@ router.get('/library', async (req, res) => {
     const movieCount = byType.find((r) => r.type === 'movie')?.c || 0;
     const seriesCount = byType.find((r) => r.type === 'series')?.c || 0;
 
-    // Página de resultados (películas y series unificadas).
+    // Página de resultados (películas y series unificadas). `sample_path` es la
+    // ruta de un video (la película, o el 1er capítulo si es serie) para saber
+    // en qué disco está guardado.
     const { rows: items } = await query(
       `SELECT m.id, m.title, m.type, m.release_year, m.genres, m.poster_url,
               m.duration, m.transcode_status, m.featured, m.created_at,
               COALESCE(ec.episode_count, 0) AS episode_count,
-              COALESCE(ec.season_count, 0)  AS season_count
+              COALESCE(ec.season_count, 0)  AS season_count,
+              COALESCE(m.video_path,
+                (SELECT video_path FROM episodes WHERE media_id = m.id ORDER BY id LIMIT 1)
+              ) AS sample_path
          FROM media m
          LEFT JOIN (
            SELECT media_id, COUNT(*)::int AS episode_count,
@@ -345,7 +366,13 @@ router.get('/library', async (req, res) => {
       [...params, pageSize, offset]
     );
 
-    res.json({ items, total, page, pageSize, movieCount, seriesCount });
+    // Añadimos el disco donde está guardado cada título.
+    const withDisk = items.map(({ sample_path, ...it }) => {
+      const d = sample_path ? diskForPath(sample_path) : null;
+      return { ...it, disk: d ? { id: d.id, label: d.label } : null };
+    });
+
+    res.json({ items: withDisk, total, page, pageSize, movieCount, seriesCount });
   } catch (err) {
     console.error('[GET /api/admin/library]', err);
     res.status(500).json({ error: 'Error al cargar la biblioteca' });
@@ -627,7 +654,7 @@ router.delete('/media/:id', async (req, res) => {
   try {
     // Recogemos rutas de archivos antes de borrar (para limpiar el disco).
     const { rows: media } = await query(
-      `SELECT type, video_path FROM media WHERE id = $1`, [id]
+      `SELECT type, video_path, poster_url, banner_url FROM media WHERE id = $1`, [id]
     );
     if (media.length === 0) return res.status(404).json({ error: 'No encontrado' });
 
@@ -638,11 +665,15 @@ router.delete('/media/:id', async (req, res) => {
     // Borrado en BD (ON DELETE CASCADE limpia episodes y watch_progress).
     await query(`DELETE FROM media WHERE id = $1`, [id]);
 
-    // Borrado de archivos físicos (best-effort).
+    // Borrado de archivos de video físicos (best-effort).
     const paths = [media[0].video_path, ...eps.map((e) => e.video_path)].filter(Boolean);
     for (const p of paths) {
       fs.rm(p, { force: true }, () => {});
     }
+    // Borrado del póster y banner subidos (limpieza completa).
+    removeImageByUrl(media[0].poster_url);
+    removeImageByUrl(media[0].banner_url);
+
     // Carpeta de la serie, si existía (en cualquier disco).
     for (const d of DISKS) {
       fs.rm(path.join(d.path, 'series', String(id)), { recursive: true, force: true }, () => {});

@@ -67,6 +67,7 @@ export default function VideoPlayer({
   const hideTimerRef = useRef(null); // temporizador para ocultar los controles
   const skipTimerRef = useRef(null); // temporizador del indicador de salto
   const skipNonce = useRef(0);
+  const bufferingRef = useRef(true); // espejo de `buffering` para leer en timers
   const hlsRef = useRef(null);       // instancia de hls.js
   const [showEndScreen, setShowEndScreen] = useState(false);
   const [buffering, setBuffering] = useState(true); // mostrando icono de carga
@@ -116,6 +117,7 @@ export default function VideoPlayer({
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
     setLevels([]);
     setShowEndScreen(false); // nuevo video -> ocultamos la pantalla de fin
+    bufferingRef.current = true;
     setBuffering(true);      // mostramos el icono de carga hasta que pueda reproducir
 
     // Intenta iniciar la reproducción automáticamente. Si el navegador la
@@ -254,10 +256,32 @@ export default function VideoPlayer({
     setShowControls(true);
     clearTimeout(hideTimerRef.current);
     hideTimerRef.current = setTimeout(() => {
-      // Sólo ocultamos si el video se está reproduciendo.
-      if (videoRef.current && !videoRef.current.paused) setShowControls(false);
+      const v = videoRef.current;
+      // Ocultamos SÓLO si está reproduciendo y no está cargando (buffering).
+      // Así los controles no parpadean cuando el video está esperando datos.
+      if (v && !v.paused && !bufferingRef.current) setShowControls(false);
     }, 3000);
   }, []);
+
+  // Detecta actividad del ratón/teclado con listeners NATIVOS sobre el
+  // contenedor. Es más fiable que onMouseMove de React en pantalla completa,
+  // donde el elemento en fullscreen es justamente este contenedor.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const wake = () => showControlsTemporarily();
+    el.addEventListener('mousemove', wake);
+    el.addEventListener('mousedown', wake);
+    el.addEventListener('touchstart', wake, { passive: true });
+    // Al entrar/salir de pantalla completa, mostramos los controles.
+    document.addEventListener('fullscreenchange', wake);
+    return () => {
+      el.removeEventListener('mousemove', wake);
+      el.removeEventListener('mousedown', wake);
+      el.removeEventListener('touchstart', wake);
+      document.removeEventListener('fullscreenchange', wake);
+    };
+  }, [showControlsTemporarily]);
 
   // Si el video se pausa, mostramos los controles de forma permanente.
   useEffect(() => {
@@ -360,24 +384,23 @@ export default function VideoPlayer({
     <div
       ref={containerRef}
       className={`relative h-full w-full bg-black ${showControls ? '' : 'cursor-none'}`}
-      onMouseMove={showControlsTemporarily}
-      onMouseLeave={() => { if (!videoRef.current?.paused) setShowControls(false); }}
     >
-      {/* La fuente (HLS o MP4) la asigna el efecto de configuración. */}
+      {/* La fuente (HLS o MP4) la asigna el efecto de configuración.
+          object-contain evita que el video se deforme en pantalla completa. */}
       <video
         ref={videoRef}
-        className="h-full w-full"
+        className="h-full w-full object-contain"
         onClick={togglePlay}
         onTimeUpdate={onTimeUpdate}
         onLoadedMetadata={onLoadedMeta}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={handleEnded}
-        onWaiting={() => setBuffering(true)}    // el video espera datos (buffering)
-        onSeeking={() => setBuffering(true)}
-        onCanPlay={() => setBuffering(false)}
-        onPlaying={() => setBuffering(false)}
-        onSeeked={() => setBuffering(false)}
+        onWaiting={() => { bufferingRef.current = true; setBuffering(true); setShowControls(true); }}
+        onSeeking={() => { bufferingRef.current = true; setBuffering(true); }}
+        onCanPlay={() => { bufferingRef.current = false; setBuffering(false); }}
+        onPlaying={() => { bufferingRef.current = false; setBuffering(false); }}
+        onSeeked={() => { bufferingRef.current = false; setBuffering(false); }}
         autoPlay
       />
 

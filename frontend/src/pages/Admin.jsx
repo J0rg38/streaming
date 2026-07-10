@@ -712,6 +712,11 @@ function LibraryManager({ adult = false }) {
                         : `${it.release_year || 's/año'}${it.duration ? ` · ${formatMinutes(it.duration)}` : ''}`}
                       {it.genres?.length ? ` · ${it.genres.join(', ')}` : ''}
                     </p>
+                    {it.disk && (
+                      <p className="mt-0.5 flex items-center gap-1 text-[11px] text-gray-500">
+                        <HardDrive size={11} /> Guardado en: <span className="text-gray-400">{it.disk.label}</span>
+                      </p>
+                    )}
                   </div>
                   <div className="flex w-full flex-wrap gap-2 sm:w-auto">
                     <button onClick={() => setEditId(it.id)}
@@ -1063,11 +1068,14 @@ function StorageManager() {
 export default function Admin() {
   const [tab, setTab] = useState('library');
   const [series, setSeries] = useState([]);
-  const { user, logout } = useAuth();
+  const { user, canAdult, logout } = useAuth();
   const navigate = useNavigate();
 
   const refreshSeries = () => fetchAdminSeries().then(setSeries).catch(console.error);
   useEffect(() => { refreshSeries(); }, []);
+
+  // Si el admin no tiene acceso adulto y estaba en esa pestaña, lo movemos.
+  useEffect(() => { if (tab === 'library18' && !canAdult) setTab('library'); }, [tab, canAdult]);
 
   const doLogout = async () => { await logout(); navigate('/login'); };
 
@@ -1076,8 +1084,9 @@ export default function Admin() {
     {
       title: 'Contenido',
       items: [
-        { key: 'library',   label: 'Biblioteca',    icon: Library },
-        { key: 'library18', label: 'Biblioteca +18', icon: Lock },
+        { key: 'library',   label: 'Biblioteca', icon: Library },
+        // La biblioteca +18 sólo se ofrece a quien tenga acceso adulto.
+        ...(canAdult ? [{ key: 'library18', label: 'Biblioteca +18', icon: Lock }] : []),
       ],
     },
     {

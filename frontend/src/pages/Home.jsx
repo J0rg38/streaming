@@ -26,8 +26,11 @@ export default function Home() {
         setContinueWatching(data.continueWatching || []);
         setRecentlyAdded(data.recentlyAdded || []);
         setStellar(data.featured || []);
-        // Banner rotativo: preferimos los estelares; si no hay, los más recientes.
-        const banner = (data.featured?.length ? data.featured : data.all || []).slice(0, 6);
+        // Banner rotativo: las últimas 5 añadidas + los destacados (sin duplicar).
+        const seen = new Set();
+        const banner = [...(data.recentlyAdded || []).slice(0, 5), ...(data.featured || [])]
+          .filter((m) => (seen.has(m.id) ? false : seen.add(m.id)))
+          .slice(0, 6);
         setBannerItems(banner);
       })
       .catch(console.error)

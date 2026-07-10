@@ -75,5 +75,7 @@ export function requireAdmin(req, res, next) {
   next();
 }
 
-// ¿El usuario puede ver contenido para adultos? (flag o administrador)
-export const canAccessAdult = (user) => user?.adult === true || user?.role === 'admin';
+// ¿El usuario puede ver contenido para adultos?
+//  SÓLO quien tenga el acceso habilitado explícitamente. Ser administrador NO
+//  concede acceso: un admin sin el check tampoco puede ver ni gestionar +18.
+export const canAccessAdult = (user) => user?.adult === true;

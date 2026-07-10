@@ -39,8 +39,9 @@ export function AuthProvider({ children }) {
   const value = {
     user, loading, login, register, logout,
     isAdmin: user?.role === 'admin',
-    // Acceso a la sección de adultos (flag del usuario o administrador).
-    canAdult: user?.adult === true || user?.role === 'admin',
+    // Acceso a la sección de adultos: SÓLO con el check habilitado (ni siquiera
+    // los administradores acceden si no lo tienen marcado).
+    canAdult: user?.adult === true,
   };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

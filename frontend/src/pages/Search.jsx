@@ -1,31 +1,44 @@
 // ----------------------------------------------------------------------------
 //  Search.jsx — Buscador de películas y series.
 //  Busca por título, género y actores. Si no hay coincidencia exacta, muestra
-//  resultados SIMILARES (el backend usa similitud trigram).
+//  resultados SIMILARES (similitud trigram). Cuando el campo está vacío, NUNCA
+//  se queda en blanco: muestra sugerencias (seguir viendo / recién añadidas).
 // ----------------------------------------------------------------------------
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { ArrowLeft, Search as SearchIcon, Loader2, X } from 'lucide-react';
-import { searchMedia } from '../api.js';
+import { searchMedia, fetchCatalog } from '../api.js';
 import MediaCard from '../components/MediaCard.jsx';
 
 export default function Search() {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const [q, setQ] = useState(params.get('q') || '');
-  const [data, setData] = useState(null);   // { results, hasTitleMatch }
+  const [data, setData] = useState(null);        // resultados de búsqueda
   const [loading, setLoading] = useState(false);
+  const [suggest, setSuggest] = useState(null);  // { continueWatching, recentlyAdded }
   const inputRef = useRef(null);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
-  // Búsqueda con "debounce" (espera 350ms tras dejar de escribir).
+  // Sugerencias por defecto (cuando no hay texto). Se cargan una vez.
+  useEffect(() => {
+    fetchCatalog()
+      .then((c) => setSuggest({
+        continueWatching: c.continueWatching || [],
+        recentlyAdded: c.recentlyAdded || [],
+      }))
+      .catch(() => setSuggest({ continueWatching: [], recentlyAdded: [] }));
+  }, []);
+
+  // Búsqueda con debounce (350ms). Si el campo se vacía, NO deja el spinner:
+  // limpia el estado y muestra las sugerencias.
   useEffect(() => {
     const term = q.trim();
-    // Sincronizamos el término con la URL (para poder compartir/recargar).
     setParams(term ? { q: term } : {}, { replace: true });
 
-    if (!term) { setData(null); return; }
+    if (!term) { setData(null); setLoading(false); return; }
+
     setLoading(true);
     const t = setTimeout(() => {
       searchMedia(term)
@@ -38,6 +51,14 @@ export default function Search() {
 
   const results = data?.results || [];
   const showSimilarNote = data && results.length > 0 && !data.hasTitleMatch;
+  const searching = q.trim().length > 0;
+
+  // Sugerencias combinadas para "más para ti" (recientes, sin duplicar con "seguir viendo").
+  const recentSuggest = useMemo(() => {
+    if (!suggest) return [];
+    const cwIds = new Set(suggest.continueWatching.map((m) => m.id));
+    return suggest.recentlyAdded.filter((m) => !cwIds.has(m.id));
+  }, [suggest]);
 
   return (
     <div className="min-h-screen">
@@ -63,42 +84,62 @@ export default function Search() {
         </div>
       </div>
 
-      {/* -------- Resultados -------- */}
       <div className="px-4 py-6 sm:px-8">
-        {loading && (
-          <div className="flex items-center gap-2 text-gray-400">
-            <Loader2 className="animate-spin" size={18} /> Buscando…
-          </div>
-        )}
-
-        {!loading && !q.trim() && (
-          <p className="text-gray-400">Escribe para buscar entre tus películas y series.</p>
-        )}
-
-        {!loading && q.trim() && results.length === 0 && (
-          <div className="text-gray-400">
-            <p>No encontramos nada para «{q}».</p>
-            <Link to="/" className="mt-2 inline-block text-brand hover:underline">Volver al inicio</Link>
-          </div>
-        )}
-
-        {!loading && results.length > 0 && (
-          <>
-            {showSimilarNote ? (
-              <p className="mb-4 text-gray-300">
-                No hay una coincidencia exacta de «<span className="font-semibold">{q}</span>».
-                Quizá te refieres a estos títulos similares:
-              </p>
-            ) : (
-              <p className="mb-4 text-gray-400">Resultados para «<span className="text-white">{q}</span>»</p>
-            )}
-
-            <div className="flex flex-wrap gap-3">
-              {results.map((item) => (
-                <MediaCard key={item.id} item={item} />
-              ))}
+        {/* -------- Modo BÚSQUEDA -------- */}
+        {searching ? (
+          loading ? (
+            <div className="flex items-center gap-2 text-gray-400">
+              <Loader2 className="animate-spin" size={18} /> Buscando…
             </div>
-          </>
+          ) : results.length === 0 ? (
+            <div className="text-gray-400">
+              <p>No encontramos nada para «{q}».</p>
+              <p className="mt-1 text-sm text-gray-600">Prueba con otro título, género o actor.</p>
+            </div>
+          ) : (
+            <>
+              {showSimilarNote ? (
+                <p className="mb-4 text-gray-300">
+                  No hay una coincidencia exacta de «<span className="font-semibold">{q}</span>».
+                  Quizá te refieres a:
+                </p>
+              ) : (
+                <p className="mb-4 text-gray-400">Resultados para «<span className="text-white">{q}</span>»</p>
+              )}
+              <div className="flex flex-wrap gap-3">
+                {results.map((item) => <MediaCard key={item.id} item={item} />)}
+              </div>
+            </>
+          )
+        ) : (
+          /* -------- Modo SUGERENCIAS (campo vacío) -------- */
+          !suggest ? (
+            <div className="flex items-center gap-2 text-gray-400">
+              <Loader2 className="animate-spin" size={18} /> Cargando…
+            </div>
+          ) : (
+            <div className="space-y-8">
+              {suggest.continueWatching.length > 0 && (
+                <section>
+                  <h2 className="mb-3 text-lg font-bold">Seguir viendo</h2>
+                  <div className="flex flex-wrap gap-3">
+                    {suggest.continueWatching.map((item) => <MediaCard key={item.id} item={item} />)}
+                  </div>
+                </section>
+              )}
+              <section>
+                <h2 className="mb-3 text-lg font-bold">Recién añadidos</h2>
+                {recentSuggest.length === 0 ? (
+                  <p className="text-gray-500">Aún no hay títulos.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-3">
+                    {recentSuggest.map((item) => <MediaCard key={item.id} item={item} />)}
+                  </div>
+                )}
+              </section>
+              <p className="text-sm text-gray-600">Escribe arriba para buscar por título, género o actor.</p>
+            </div>
+          )
         )}
       </div>
     </div>
