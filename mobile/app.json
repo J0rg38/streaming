@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "Mi VOD",
+    "slug": "vod-mobile",
+    "version": "1.0.0",
+    "orientation": "default",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#141414",
+    "splash": {
+      "backgroundColor": "#141414",
+      "resizeMode": "contain"
+    },
+    "android": {
+      "package": "com.mivod.app"
+    },
+    "plugins": ["expo-secure-store"]
+  }
+}

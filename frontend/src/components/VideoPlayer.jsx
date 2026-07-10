@@ -263,23 +263,24 @@ export default function VideoPlayer({
     }, 3000);
   }, []);
 
-  // Detecta actividad del ratón/teclado con listeners NATIVOS sobre el
-  // contenedor. Es más fiable que onMouseMove de React en pantalla completa,
-  // donde el elemento en fullscreen es justamente este contenedor.
+  // Detecta actividad a nivel de DOCUMENTO con pointer events. Esto es
+  // independiente del tamaño/relación de aspecto de la pantalla y del monitor:
+  // funciona igual en 16:9, 16:10, ultrawide, monitores externos, etc. (donde
+  // los listeners atados a un elemento concreto podían fallar en pantalla
+  // completa por el letterbox / bandas negras).
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
     const wake = () => showControlsTemporarily();
-    el.addEventListener('mousemove', wake);
-    el.addEventListener('mousedown', wake);
-    el.addEventListener('touchstart', wake, { passive: true });
-    // Al entrar/salir de pantalla completa, mostramos los controles.
+    document.addEventListener('pointermove', wake);
+    document.addEventListener('pointerdown', wake);
+    document.addEventListener('keydown', wake);
     document.addEventListener('fullscreenchange', wake);
+    document.addEventListener('webkitfullscreenchange', wake);
     return () => {
-      el.removeEventListener('mousemove', wake);
-      el.removeEventListener('mousedown', wake);
-      el.removeEventListener('touchstart', wake);
+      document.removeEventListener('pointermove', wake);
+      document.removeEventListener('pointerdown', wake);
+      document.removeEventListener('keydown', wake);
       document.removeEventListener('fullscreenchange', wake);
+      document.removeEventListener('webkitfullscreenchange', wake);
     };
   }, [showControlsTemporarily]);
 
@@ -361,8 +362,14 @@ export default function VideoPlayer({
 
   const toggleFullscreen = () => {
     const el = containerRef.current;
-    if (!document.fullscreenElement) el?.requestFullscreen?.();
-    else document.exitFullscreen?.();
+    const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+    if (!fsEl) {
+      (el?.requestFullscreen || el?.webkitRequestFullscreen)?.call(el);
+    } else {
+      (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+    }
+    // Al cambiar de modo, despertamos los controles de inmediato.
+    showControlsTemporarily();
   };
 
   // Al terminar el video: guardamos progreso y mostramos la pantalla de fin.

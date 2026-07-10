@@ -59,7 +59,8 @@ router.post('/register', authLimiter, async (req, res) => {
     const user = rows[0];
     const token = signToken(user);
     setAuthCookie(res, token);
-    res.status(201).json({ user: publicUser(user) });
+    // token en el body para clientes sin cookies (app móvil). La web usa la cookie.
+    res.status(201).json({ user: publicUser(user), token });
   } catch (err) {
     if (err.code === '23505') { // email duplicado
       return res.status(409).json({ error: 'Ese email ya está registrado' });
@@ -97,7 +98,7 @@ router.post('/login', authLimiter, async (req, res) => {
 
     const token = signToken(user);
     setAuthCookie(res, token);
-    res.json({ user: publicUser(user) });
+    res.json({ user: publicUser(user), token });
   } catch (err) {
     console.error('[POST /login]', err);
     res.status(500).json({ error: 'Error al iniciar sesión' });
