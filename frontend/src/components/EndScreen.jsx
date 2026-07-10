@@ -90,7 +90,7 @@ export default function EndScreen({
                   <svg className="absolute inset-0 -rotate-90" width="80" height="80">
                     <circle cx="40" cy="40" r={R} fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="4" />
                     <circle
-                      cx="40" cy="40" r={R} fill="none" stroke="#e50914" strokeWidth="4"
+                      cx="40" cy="40" r={R} fill="none" stroke="#E35336" strokeWidth="4"
                       strokeDasharray={C} strokeDashoffset={C - ringOffset} strokeLinecap="round"
                       style={{ transition: 'stroke-dashoffset 1s linear' }}
                     />

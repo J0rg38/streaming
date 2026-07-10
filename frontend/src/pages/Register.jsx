@@ -55,7 +55,7 @@ export default function Register() {
           <input type="password" value={form.password} onChange={update('password')} placeholder="Contraseña (mín. 8 caracteres)" required autoComplete="new-password" className={inputCls} />
           <button
             type="submit" disabled={submitting}
-            className="flex w-full items-center justify-center gap-2 rounded bg-brand py-2.5 font-semibold hover:bg-red-700 disabled:opacity-50"
+            className="flex w-full items-center justify-center gap-2 rounded bg-brand py-2.5 font-semibold hover:bg-brand-dark disabled:opacity-50"
           >
             {submitting ? <Loader2 className="animate-spin" size={18} /> : <UserPlus size={18} />}
             Crear cuenta

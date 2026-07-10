@@ -213,7 +213,7 @@ function MovieForm({ onDone }) {
         <Field label="Video *"><input name="video" type="file" accept="video/*" required className={inputCls} /></Field>
       </div>
       <button type="submit" disabled={status === 'uploading' || reading}
-        className="flex items-center gap-2 rounded bg-brand px-5 py-2 font-semibold hover:bg-red-700 disabled:opacity-50">
+        className="flex items-center gap-2 rounded bg-brand px-5 py-2 font-semibold hover:bg-brand-dark disabled:opacity-50">
         {reading ? <Loader2 className="animate-spin" size={18} /> : <UploadCloud size={18} />}
         {reading ? 'Leyendo duración…' : 'Subir película'}
       </button>
@@ -254,7 +254,7 @@ function SeriesForm({ onCreated }) {
         <Field label="Banner"><input name="banner" type="file" accept="image/*" className={inputCls} /></Field>
       </div>
       <button type="submit" disabled={status === 'uploading'}
-        className="flex items-center gap-2 rounded bg-brand px-5 py-2 font-semibold hover:bg-red-700 disabled:opacity-50">
+        className="flex items-center gap-2 rounded bg-brand px-5 py-2 font-semibold hover:bg-brand-dark disabled:opacity-50">
         <Clapperboard size={18} /> Crear serie
       </button>
       <ProgressBar progress={progress} status={status} />
@@ -448,7 +448,7 @@ function EpisodeForm({ series, refreshSeries }) {
       </Field>
 
       <button type="submit" disabled={status === 'uploading' || reading || !selected || !season}
-        className="flex items-center gap-2 rounded bg-brand px-5 py-2 font-semibold hover:bg-red-700 disabled:opacity-50">
+        className="flex items-center gap-2 rounded bg-brand px-5 py-2 font-semibold hover:bg-brand-dark disabled:opacity-50">
         {reading ? <Loader2 className="animate-spin" size={18} /> : <ListPlus size={18} />}
         {reading ? 'Leyendo duración…' : 'Añadir capítulo'}
       </button>
@@ -565,7 +565,7 @@ function MediaEditModal({ id, onClose, onSaved }) {
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={onClose} className="rounded bg-white/10 px-4 py-2 text-sm hover:bg-white/20">Cancelar</button>
               <button type="submit" disabled={saving}
-                className="flex items-center gap-2 rounded bg-brand px-4 py-2 text-sm font-semibold hover:bg-red-700 disabled:opacity-50">
+                className="flex items-center gap-2 rounded bg-brand px-4 py-2 text-sm font-semibold hover:bg-brand-dark disabled:opacity-50">
                 {saving ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle2 size={16} />} Guardar cambios
               </button>
             </div>
@@ -857,7 +857,7 @@ function UserFormModal({ user, currentUser, onClose, onSaved }) {
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="rounded bg-white/10 px-4 py-2 text-sm hover:bg-white/20">Cancelar</button>
             <button type="submit" disabled={saving}
-              className="flex items-center gap-2 rounded bg-brand px-4 py-2 text-sm font-semibold hover:bg-red-700 disabled:opacity-50">
+              className="flex items-center gap-2 rounded bg-brand px-4 py-2 text-sm font-semibold hover:bg-brand-dark disabled:opacity-50">
               {saving ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle2 size={16} />}
               {editing ? 'Guardar cambios' : 'Crear usuario'}
             </button>
@@ -914,7 +914,7 @@ function UserManager() {
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por email o nombre…" className={`${inputCls} pl-9`} />
         </div>
         <button onClick={() => setModal({ user: null })}
-          className="flex items-center gap-2 rounded bg-brand px-4 py-2 text-sm font-semibold hover:bg-red-700">
+          className="flex items-center gap-2 rounded bg-brand px-4 py-2 text-sm font-semibold hover:bg-brand-dark">
           <UserPlus size={16} /> Nuevo usuario
         </button>
       </div>
@@ -983,6 +983,81 @@ function UserManager() {
 }
 
 // ===========================================================================
+//  Pestaña ALMACENAMIENTO: uso de cada disco con barras y alertas.
+// ===========================================================================
+function StorageManager() {
+  const [disks, setDisks] = useState(null);
+
+  const load = () => fetchDisks().then(setDisks).catch(() => setDisks([]));
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 15000); // refresco cada 15s
+    return () => clearInterval(t);
+  }, []);
+
+  if (disks === null) return <p className="text-gray-400">Cargando discos…</p>;
+  if (disks.length === 0) return <p className="text-gray-400">No hay discos configurados.</p>;
+
+  const totalCap = disks.reduce((a, d) => a + (d.total || 0), 0);
+  const totalFree = disks.reduce((a, d) => a + (d.free || 0), 0);
+
+  return (
+    <div className="space-y-5">
+      {/* Resumen global */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="rounded-lg border border-gray-800 bg-card p-4">
+          <p className="text-xs uppercase tracking-wide text-gray-500">Discos</p>
+          <p className="mt-1 text-2xl font-bold">{disks.length}</p>
+        </div>
+        <div className="rounded-lg border border-gray-800 bg-card p-4">
+          <p className="text-xs uppercase tracking-wide text-gray-500">Capacidad total</p>
+          <p className="mt-1 text-2xl font-bold">{formatBytes(totalCap)}</p>
+        </div>
+        <div className="rounded-lg border border-gray-800 bg-card p-4">
+          <p className="text-xs uppercase tracking-wide text-gray-500">Espacio libre</p>
+          <p className="mt-1 text-2xl font-bold text-green-400">{formatBytes(totalFree)}</p>
+        </div>
+      </div>
+
+      {/* Detalle por disco */}
+      <div className="space-y-3">
+        {disks.map((d) => {
+          const offline = d.total == null;
+          const pct = d.total ? Math.round((d.used / d.total) * 100) : 0;
+          const nearFull = pct >= 90;
+          const barColor = offline ? 'bg-gray-600' : nearFull ? 'bg-red-500' : pct >= 75 ? 'bg-yellow-500' : 'bg-brand';
+          return (
+            <div key={d.id} className="rounded-lg border border-gray-800 bg-card p-4">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <HardDrive size={18} className="text-gray-400" />
+                <span className="font-semibold">{d.label}</span>
+                <span className="text-xs text-gray-500">({d.id})</span>
+                {offline ? (
+                  <span className="ml-auto rounded-full bg-gray-600/30 px-2 py-0.5 text-[10px] text-gray-300">No disponible</span>
+                ) : nearFull ? (
+                  <span className="ml-auto rounded-full bg-red-600/20 px-2 py-0.5 text-[10px] font-medium text-red-300">¡Casi lleno!</span>
+                ) : (
+                  <span className="ml-auto text-xs text-gray-400">{formatBytes(d.free)} libres de {formatBytes(d.total)}</span>
+                )}
+              </div>
+              <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-700">
+                <div className={`h-full ${barColor} transition-all`} style={{ width: `${pct}%` }} />
+              </div>
+              <div className="mt-1 flex items-center justify-between text-xs text-gray-500">
+                <span>{offline ? 'Disco no montado o sin permisos' : `${pct}% usado · ${formatBytes(d.used)}`}</span>
+                <span className="truncate pl-2">{d.path}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <p className="text-xs text-gray-600">Se actualiza automáticamente cada 15 segundos.</p>
+    </div>
+  );
+}
+
+// ===========================================================================
 //  Página principal del panel.
 // ===========================================================================
 export default function Admin() {
@@ -1016,7 +1091,8 @@ export default function Admin() {
     {
       title: 'Sistema',
       items: [
-        { key: 'users', label: 'Usuarios', icon: Users },
+        { key: 'users',   label: 'Usuarios',       icon: Users },
+        { key: 'storage', label: 'Almacenamiento', icon: HardDrive },
       ],
     },
   ];
@@ -1048,6 +1124,7 @@ export default function Admin() {
       {tab === 'series'    && <SeriesForm onCreated={refreshSeries} />}
       {tab === 'episode'   && <EpisodeForm series={series} refreshSeries={refreshSeries} />}
       {tab === 'users'     && <UserManager />}
+      {tab === 'storage'   && <StorageManager />}
     </>
   );
 

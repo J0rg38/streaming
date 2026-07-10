@@ -61,7 +61,7 @@ export default function Login() {
           />
           <button
             type="submit" disabled={submitting}
-            className="flex w-full items-center justify-center gap-2 rounded bg-brand py-2.5 font-semibold hover:bg-red-700 disabled:opacity-50"
+            className="flex w-full items-center justify-center gap-2 rounded bg-brand py-2.5 font-semibold hover:bg-brand-dark disabled:opacity-50"
           >
             {submitting ? <Loader2 className="animate-spin" size={18} /> : <LogIn size={18} />}
             Entrar

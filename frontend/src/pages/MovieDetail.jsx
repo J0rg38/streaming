@@ -68,7 +68,7 @@ export default function MovieDetail() {
         <div className="absolute inset-0 bg-gradient-to-r from-surface/80 to-transparent" />
 
         <button
-          onClick={() => navigate('/')}
+          onClick={() => navigate(-1)}
           className="absolute left-4 top-4 flex items-center gap-1 rounded bg-black/50 px-3 py-1.5 text-sm hover:bg-black/70 sm:left-6 sm:top-6"
         >
           <ArrowLeft size={18} /> Volver

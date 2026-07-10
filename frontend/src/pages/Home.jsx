@@ -113,7 +113,7 @@ export default function Home() {
               {isAdmin ? 'Tu catálogo está vacío.' : 'Todavía no hay contenido disponible.'}
             </p>
             {isAdmin && (
-              <Link to="/admin" className="rounded bg-brand px-5 py-2 font-semibold hover:bg-red-700">
+              <Link to="/admin" className="rounded bg-brand px-5 py-2 font-semibold hover:bg-brand-dark">
                 Subir mi primer título
               </Link>
             )}

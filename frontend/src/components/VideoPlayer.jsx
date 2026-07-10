@@ -65,9 +65,12 @@ export default function VideoPlayer({
   const videoRef = useRef(null);
   const containerRef = useRef(null);
   const hideTimerRef = useRef(null); // temporizador para ocultar los controles
+  const skipTimerRef = useRef(null); // temporizador del indicador de salto
+  const skipNonce = useRef(0);
   const hlsRef = useRef(null);       // instancia de hls.js
   const [showEndScreen, setShowEndScreen] = useState(false);
   const [buffering, setBuffering] = useState(true); // mostrando icono de carga
+  const [skipHint, setSkipHint] = useState(null);   // { dir, secs, nonce } al saltar
 
   // Miniaturas del preview de la barra (sprite + cues del WebVTT).
   const [cues, setCues] = useState([]);
@@ -232,7 +235,19 @@ export default function VideoPlayer({
     if (v) { v.currentTime = value; setCurrent(value); }
   };
 
-  const skip = (delta) => seekTo(Math.max(0, Math.min(duration, current + delta)));
+  // Salto ±Ns leyendo el video directamente (robusto ante closures) + muestra
+  // un indicador animado de "+10s / -10s" (estilo Netflix).
+  const skip = (delta) => {
+    const v = videoRef.current;
+    if (!v) return;
+    const target = Math.max(0, Math.min(v.duration || Infinity, v.currentTime + delta));
+    v.currentTime = target;
+    setCurrent(target);
+    // nonce cambia cada vez para reiniciar la animación en pulsaciones repetidas.
+    setSkipHint({ dir: delta < 0 ? -1 : 1, secs: Math.abs(delta), nonce: (skipNonce.current += 1) });
+    clearTimeout(skipTimerRef.current);
+    skipTimerRef.current = setTimeout(() => setSkipHint(null), 650);
+  };
 
   // --- Mostrar controles y programar su ocultado tras 3s de inactividad ----
   const showControlsTemporarily = useCallback(() => {
@@ -265,12 +280,12 @@ export default function VideoPlayer({
       switch (e.key) {
         case 'ArrowRight':
           e.preventDefault();
-          v.currentTime = Math.min(v.duration || Infinity, v.currentTime + 10);
+          skip(10);
           showControlsTemporarily();
           break;
         case 'ArrowLeft':
           e.preventDefault();
-          v.currentTime = Math.max(0, v.currentTime - 10);
+          skip(-10);
           showControlsTemporarily();
           break;
         case ' ':
@@ -373,6 +388,21 @@ export default function VideoPlayer({
         </div>
       )}
 
+      {/* Indicador animado de salto ±10s (estilo Netflix) */}
+      <style>{`@keyframes skipfade{0%{opacity:0;transform:scale(.7)}25%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1)}}`}</style>
+      {skipHint && (
+        <div
+          key={skipHint.nonce}
+          className={`pointer-events-none absolute top-1/2 -translate-y-1/2 ${skipHint.dir < 0 ? 'left-[12%]' : 'right-[12%]'}`}
+          style={{ animation: 'skipfade 650ms ease-out forwards' }}
+        >
+          <div className="flex h-20 w-20 flex-col items-center justify-center rounded-full bg-black/60 text-white backdrop-blur">
+            {skipHint.dir < 0 ? <RotateCcw size={26} /> : <RotateCw size={26} />}
+            <span className="mt-0.5 text-sm font-semibold">{skipHint.secs}s</span>
+          </div>
+        </div>
+      )}
+
       {/* Barra superior: botón volver + título (mismo patrón que Netflix) */}
       {showControls && (
         <div className="pointer-events-none absolute left-0 top-0 w-full bg-gradient-to-b from-black/80 to-transparent p-4">
@@ -436,7 +466,7 @@ export default function VideoPlayer({
               onChange={(e) => seekTo(Number(e.target.value))}
               className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-gray-600 accent-brand"
               style={{
-                background: `linear-gradient(to right, #e50914 ${progressPct}%, #4b5563 ${progressPct}%)`,
+                background: `linear-gradient(to right, #E35336 ${progressPct}%, #4b5563 ${progressPct}%)`,
               }}
             />
           </div>
