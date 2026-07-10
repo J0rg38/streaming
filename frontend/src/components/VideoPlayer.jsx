@@ -67,6 +67,8 @@ export default function VideoPlayer({
   const bufferingRef = useRef(true);
   const skipTimerRef = useRef(null);
   const skipNonce = useRef(0);
+  const hideTimerRef = useRef(null);
+  const overControlsRef = useRef(false);
 
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -78,6 +80,7 @@ export default function VideoPlayer({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [showSettings, setShowSettings] = useState(false);
+  const [controls, setControls] = useState(true);
   const [levels, setLevels] = useState([]);
   const [selectedLevel, setSelectedLevel] = useState(-1);
   const [autoLevel, setAutoLevel] = useState(-1);
@@ -88,6 +91,16 @@ export default function VideoPlayer({
   const [showEndScreen, setShowEndScreen] = useState(false);
 
   const setBuf = (v) => { bufferingRef.current = v; setBuffering(v); };
+
+  // --- Mostrar controles y ocultar tras 3s de inactividad (estilo Netflix) --
+  const bumpControls = useCallback(() => {
+    setControls(true);
+    clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = setTimeout(() => {
+      const v = videoRef.current;
+      if (v && !v.paused && !bufferingRef.current && !overControlsRef.current) setControls(false);
+    }, 3000);
+  }, []);
 
   // --- Fuente: HLS (hls.js / nativo) o MP4 progresivo -----------------------
   useEffect(() => {
@@ -165,16 +178,22 @@ export default function VideoPlayer({
     return () => { cancelled = true; };
   }, [thumbnailsUrl]);
 
-  // --- Estado de pantalla completa (para el icono maximizar/minimizar) ------
+  // --- Estado de pantalla completa + mostrar controles al cambiar -----------
   useEffect(() => {
-    const onFs = () => setIsFullscreen(!!isFsElement());
+    const onFs = () => { setIsFullscreen(!!isFsElement()); bumpControls(); };
     document.addEventListener('fullscreenchange', onFs);
     document.addEventListener('webkitfullscreenchange', onFs);
     return () => { document.removeEventListener('fullscreenchange', onFs); document.removeEventListener('webkitfullscreenchange', onFs); };
-  }, []);
+  }, [bumpControls]);
+
+  // En pausa/carga, controles siempre visibles.
+  useEffect(() => {
+    if (!playing || buffering) { clearTimeout(hideTimerRef.current); setControls(true); }
+    else bumpControls();
+  }, [playing, buffering, bumpControls]);
 
   // --- Handlers --------------------------------------------------------------
-  const togglePlay = () => { const v = videoRef.current; if (!v) return; if (v.paused) v.play(); else { v.pause(); persist(); } };
+  const togglePlay = () => { const v = videoRef.current; if (!v) return; if (v.paused) v.play(); else { v.pause(); persist(); } bumpControls(); };
   const onTimeUpdate = () => {
     const v = videoRef.current; if (!v) return;
     setCurrent(v.currentTime || 0);
@@ -189,6 +208,7 @@ export default function VideoPlayer({
     setSkipHint({ dir: delta < 0 ? -1 : 1, secs: Math.abs(delta), nonce: (skipNonce.current += 1) });
     clearTimeout(skipTimerRef.current);
     skipTimerRef.current = setTimeout(() => setSkipHint(null), 650);
+    bumpControls();
   };
   const changeVolume = (val) => { const v = videoRef.current; if (!v) return; v.volume = val; v.muted = val === 0; setVolume(val); setMuted(val === 0); };
   const toggleMute = () => { const v = videoRef.current; if (!v) return; v.muted = !v.muted; setMuted(v.muted); if (!v.muted && v.volume === 0) { v.volume = 0.5; setVolume(0.5); } };
@@ -216,6 +236,7 @@ export default function VideoPlayer({
         case 'm': toggleMute(); break;
         default: break;
       }
+      bumpControls();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -226,26 +247,25 @@ export default function VideoPlayer({
   const bufferedPct = duration ? Math.min(100, (bufferedEnd / duration) * 100) : 0;
   const previewCue = preview.visible && cues.length
     ? (cues.find((c) => preview.time >= c.start && preview.time < c.end) || cues[cues.length - 1]) : null;
-  // Visibilidad con CSS :hover (group-hover): el navegador la aplica según la
-  // POSICIÓN del cursor, sin depender de eventos JS que en algunos equipos no se
-  // disparan sobre el <video>. Siempre visibles en pausa/carga/fin.
-  const forceControls = !playing || buffering || showEndScreen;
-  const controlsCls = `transition-opacity duration-300 ${
-    forceControls
-      ? 'opacity-100'
-      : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto'
-  }`;
+  const controlsCls = `transition-opacity duration-300 ${controls ? 'opacity-100' : 'pointer-events-none opacity-0'}`;
 
   return (
     <div
       ref={containerRef}
       data-player
-      className="group relative h-full w-full select-none overflow-hidden bg-black"
+      className={`relative h-full w-full select-none overflow-hidden bg-black ${controls ? '' : 'cursor-none'}`}
+      style={{ isolation: 'isolate' }}
+      onMouseMove={bumpControls}
+      onTouchStart={bumpControls}
     >
-      {/* Video (object-contain: correcto en cualquier relación de aspecto) */}
+      {/* Video (object-contain: correcto en cualquier relación de aspecto).
+          El border-radius mínimo DESACTIVA el overlay de hardware del video, que
+          en algunos equipos/tamaños de video tapaba los controles HTML (haciendo
+          que solo se vieran controles nativos como la barra de tiempo). */}
       <video
         ref={videoRef}
         className="h-full w-full object-contain"
+        style={{ borderRadius: '1px' }}
         onClick={togglePlay}
         onTimeUpdate={onTimeUpdate}
         onProgress={onTimeUpdate}
@@ -306,6 +326,8 @@ export default function VideoPlayer({
       {/* Barra de controles inferior */}
       <div
         className={`absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/85 via-black/40 to-transparent px-3 pb-3 pt-12 sm:px-4 sm:pb-4 ${controlsCls}`}
+        onMouseEnter={() => { overControlsRef.current = true; setControls(true); clearTimeout(hideTimerRef.current); }}
+        onMouseLeave={() => { overControlsRef.current = false; bumpControls(); }}
       >
         {/* Barra de progreso (buffer + progreso + preview de miniaturas) */}
         <div
