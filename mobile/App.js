@@ -13,6 +13,7 @@ import AdultCatalogScreen from './src/screens/AdultCatalogScreen';
 import TitleScreen from './src/screens/TitleScreen';
 import PlayerScreen from './src/screens/PlayerScreen';
 import SearchScreen from './src/screens/SearchScreen';
+import DownloadsScreen from './src/screens/DownloadsScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -40,6 +41,7 @@ function Routes() {
           <Stack.Screen name="Adult" component={AdultCatalogScreen} options={{ headerShown: false }} />
           <Stack.Screen name="Title" component={TitleScreen} options={{ title: '' }} />
           <Stack.Screen name="Search" component={SearchScreen} options={{ title: 'Buscar' }} />
+          <Stack.Screen name="Downloads" component={DownloadsScreen} options={{ title: 'Descargas' }} />
           <Stack.Screen name="Player" component={PlayerScreen} options={{ headerShown: false, orientation: 'landscape' }} />
         </>
       )}

@@ -33,7 +33,7 @@ function fmt(t) {
 }
 
 export default function PlayerScreen({ route, navigation }) {
-  const { mediaId, episodeId } = route.params;
+  const { mediaId, episodeId, localUri } = route.params;
   const insets = useSafeAreaInsets();
 
   const [source, setSource] = useState(null);
@@ -66,8 +66,18 @@ export default function PlayerScreen({ route, navigation }) {
     else revealControls();
   };
 
-  // --- Resolver ruta del video y punto de reanudación -----------------------
+  // --- Resolver la fuente y el punto de reanudación -------------------------
   useEffect(() => {
+    // Reproducción OFFLINE: el video ya está en el dispositivo.
+    if (localUri) {
+      (async () => {
+        const { stopped_at } = await fetchProgress(mediaId, episodeId); // 0 si no hay red
+        startAt.current = stopped_at || 0;
+        setSource({ uri: localUri });
+      })();
+      return;
+    }
+    // Reproducción por streaming.
     (async () => {
       const media = await fetchMedia(mediaId);
       let videoPath;
@@ -81,7 +91,7 @@ export default function PlayerScreen({ route, navigation }) {
       startAt.current = stopped_at || 0;
       setSource({ uri: streamUrl(videoPath), headers: authHeaders() });
     })().catch(console.warn);
-  }, [mediaId, episodeId]);
+  }, [mediaId, episodeId, localUri]);
 
   // --- Crear el reproductor cuando hay fuente -------------------------------
   const player = useVideoPlayer(source, (p) => {

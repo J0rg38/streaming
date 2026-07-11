@@ -28,3 +28,13 @@ body {
   max-width: 100vw !important;
   max-height: 100vh !important;
 }
+
+/* Promueve las capas de controles a su PROPIA capa de composición para que se
+   pinten por encima del overlay de hardware del video (mismo motivo por el que
+   los controles nativos como <input range> sí se veían). Así mantenemos el
+   overlay de hardware (reproducción fluida, sin caída de FPS) y los controles
+   siguen visibles en pantalla completa y en cualquier monitor. */
+.vp-layer {
+  transform: translateZ(0);
+  will-change: transform;
+}

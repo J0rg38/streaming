@@ -285,13 +285,12 @@ export default function VideoPlayer({
       onTouchStart={bumpControls}
     >
       {/* Video (object-contain: correcto en cualquier relación de aspecto).
-          El border-radius mínimo DESACTIVA el overlay de hardware del video, que
-          en algunos equipos/tamaños de video tapaba los controles HTML (haciendo
-          que solo se vieran controles nativos como la barra de tiempo). */}
+          Mantiene el overlay de hardware para una reproducción fluida; los
+          controles se pintan por encima gracias a la clase .vp-layer (capa de
+          composición propia), no desactivando el overlay del video. */}
       <video
         ref={videoRef}
         className="h-full w-full object-contain"
-        style={{ borderRadius: '1px' }}
         onClick={togglePlay}
         onTimeUpdate={onTimeUpdate}
         onProgress={onTimeUpdate}
@@ -316,7 +315,7 @@ export default function VideoPlayer({
 
       {/* Spinner de carga */}
       {buffering && !showEndScreen && (
-        <div className="pointer-events-none absolute inset-0 grid place-items-center">
+        <div className="vp-layer pointer-events-none absolute inset-0 grid place-items-center">
           <Loader2 size={56} className="animate-spin text-white/90 drop-shadow-lg" />
         </div>
       )}
@@ -336,7 +335,7 @@ export default function VideoPlayer({
 
       {/* Controles centrales (estilo MAX): atrasar · play/pausa · adelantar */}
       {!buffering && !showEndScreen && (
-        <div className={`pointer-events-none absolute inset-0 flex items-center justify-center gap-10 sm:gap-16 ${controlsCls}`}>
+        <div className={`vp-layer pointer-events-none absolute inset-0 flex items-center justify-center gap-10 sm:gap-16 ${controlsCls}`}>
           <button onClick={() => skip(-10)}
             className="pointer-events-auto grid h-14 w-14 place-items-center rounded-full text-white/90 transition hover:scale-110 hover:bg-white/10 hover:text-white sm:h-16 sm:w-16"
             aria-label="Atrasar 10 segundos">
@@ -356,7 +355,7 @@ export default function VideoPlayer({
       )}
 
       {/* Barra superior */}
-      <div className={`absolute left-0 top-0 w-full bg-gradient-to-b from-black/80 to-transparent p-4 ${controlsCls}`}>
+      <div className={`vp-layer absolute left-0 top-0 w-full bg-gradient-to-b from-black/80 to-transparent p-4 ${controlsCls}`}>
         <div className="flex items-center gap-3">
           {onBack && (
             <button onClick={onBack} className="flex flex-shrink-0 items-center gap-1 rounded bg-black/40 px-3 py-1.5 text-sm text-white hover:bg-black/70">
@@ -369,7 +368,7 @@ export default function VideoPlayer({
 
       {/* Barra de controles inferior */}
       <div
-        className={`absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/85 via-black/40 to-transparent px-3 pb-3 pt-12 sm:px-4 sm:pb-4 ${controlsCls}`}
+        className={`vp-layer absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/85 via-black/40 to-transparent px-3 pb-3 pt-12 sm:px-4 sm:pb-4 ${controlsCls}`}
         onMouseEnter={() => { overControlsRef.current = true; setControls(true); clearTimeout(hideTimerRef.current); }}
         onMouseLeave={() => { overControlsRef.current = false; bumpControls(); }}
       >

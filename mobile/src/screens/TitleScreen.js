@@ -1,10 +1,12 @@
 // ----------------------------------------------------------------------------
-//  TitleScreen — detalle de un título. Película: botón reproducir. Serie:
-//  selector de temporada y lista de capítulos.
+//  TitleScreen — detalle de un título. Película: reproducir + descargar. Serie:
+//  selector de temporada y lista de capítulos (cada uno con su descarga).
 // ----------------------------------------------------------------------------
 import { useEffect, useMemo, useState } from 'react';
 import { View, Text, Image, ScrollView, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { fetchMedia, imageSource } from '../api';
+import DownloadButton from '../components/DownloadButton';
+import { PlayFilledIcon } from '../components/Icons';
 
 export default function TitleScreen({ route, navigation }) {
   const { id } = route.params;
@@ -39,9 +41,16 @@ export default function TitleScreen({ route, navigation }) {
         {!!media.description && <Text style={styles.desc}>{media.description}</Text>}
 
         {media.type === 'movie' ? (
-          <TouchableOpacity style={styles.playBtn} onPress={playMovie}>
-            <Text style={styles.playText}>▶  Reproducir</Text>
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity style={styles.playBtn} onPress={playMovie}>
+              <PlayFilledIcon size={18} color="#000" />
+              <Text style={styles.playText}>Reproducir</Text>
+            </TouchableOpacity>
+            <DownloadButton
+              variant="full"
+              item={{ mediaId: media.id, title: media.title, posterUrl: media.poster_url, videoPath: media.video_path }}
+            />
+          </>
         ) : (
           <>
             {/* Selector de temporada */}
@@ -55,11 +64,23 @@ export default function TitleScreen({ route, navigation }) {
             </View>
             {/* Capítulos */}
             {episodes.map((ep) => (
-              <TouchableOpacity key={ep.id} style={styles.epRow} onPress={() => playEpisode(ep)}>
-                <Text style={styles.epNum}>{ep.episode_number}</Text>
-                <Text style={styles.epTitle} numberOfLines={1}>{ep.title || `Capítulo ${ep.episode_number}`}</Text>
-                <Text style={styles.epPlay}>▶</Text>
-              </TouchableOpacity>
+              <View key={ep.id} style={styles.epRow}>
+                <TouchableOpacity style={styles.epMain} onPress={() => playEpisode(ep)} activeOpacity={0.7}>
+                  <Text style={styles.epNum}>{ep.episode_number}</Text>
+                  <Text style={styles.epTitle} numberOfLines={1}>{ep.title || `Capítulo ${ep.episode_number}`}</Text>
+                </TouchableOpacity>
+                <DownloadButton
+                  variant="compact"
+                  item={{
+                    mediaId: media.id, episodeId: ep.id,
+                    title: media.title, subtitle: `T${ep.season_number}:E${ep.episode_number}`,
+                    posterUrl: media.poster_url, videoPath: ep.video_path,
+                  }}
+                />
+                <TouchableOpacity onPress={() => playEpisode(ep)} hitSlop={8}>
+                  <PlayFilledIcon size={15} color="#E35336" />
+                </TouchableOpacity>
+              </View>
             ))}
           </>
         )}
@@ -74,14 +95,14 @@ const styles = StyleSheet.create({
   title: { color: '#fff', fontSize: 26, fontWeight: '800' },
   meta: { color: '#aaa', marginTop: 4 },
   desc: { color: '#ddd', marginTop: 12, lineHeight: 20 },
-  playBtn: { backgroundColor: '#fff', borderRadius: 8, padding: 14, alignItems: 'center', marginTop: 18 },
+  playBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#fff', borderRadius: 8, padding: 14, marginTop: 18 },
   playText: { color: '#000', fontWeight: '800', fontSize: 16 },
   seasonRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 18, marginBottom: 8 },
   seasonChip: { backgroundColor: '#1f1f1f', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 },
   seasonChipActive: { backgroundColor: '#E35336' },
   seasonText: { color: '#ccc' }, seasonTextActive: { color: '#fff', fontWeight: '700' },
-  epRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1f1f1f', borderRadius: 8, padding: 12, marginTop: 8 },
+  epRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1f1f1f', borderRadius: 8, paddingLeft: 12, paddingRight: 10, marginTop: 8 },
+  epMain: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
   epNum: { color: '#888', width: 28, fontSize: 16, fontWeight: '700' },
   epTitle: { color: '#fff', flex: 1 },
-  epPlay: { color: '#E35336', fontSize: 16 },
 });

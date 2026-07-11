@@ -8,6 +8,7 @@ import { fetchCatalog } from '../api';
 import { useAuth } from '../auth';
 import Logo from '../components/Logo';
 import Rail from '../components/Rail';
+import { DownloadIcon } from '../components/Icons';
 
 export default function CatalogScreen({ navigation }) {
   const { user, signOut } = useAuth();
@@ -38,6 +39,7 @@ export default function CatalogScreen({ navigation }) {
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
           <TouchableOpacity onPress={() => navigation.navigate('Search')}><Text style={styles.link}>Buscar</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('Downloads')} hitSlop={8}><DownloadIcon size={22} color="#ddd" /></TouchableOpacity>
           {user?.adult && (
             <TouchableOpacity onPress={() => navigation.navigate('Adult')} style={styles.adultBtn}>
               <Text style={styles.adultTxt}>+18</Text>
