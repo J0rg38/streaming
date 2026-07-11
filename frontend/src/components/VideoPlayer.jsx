@@ -26,7 +26,7 @@ const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 // Refuerzo de volumen: el <video> HTML topa en 100%. Con un GainNode de Web
 // Audio amplificamos por encima de eso para que el volumen base se oiga fuerte.
-const VOLUME_BOOST = 1.6;
+const VOLUME_BOOST = 1.7;
 
 function fmt(t) {
   if (!Number.isFinite(t)) return '0:00';
@@ -328,13 +328,25 @@ export default function VideoPlayer({
         </div>
       )}
 
-      {/* Play central cuando está en pausa */}
-      {!playing && !buffering && !showEndScreen && (
-        <button onClick={togglePlay} className="absolute inset-0 grid place-items-center" aria-label="Reproducir">
-          <span className="grid h-20 w-20 place-items-center rounded-full bg-black/50 text-white backdrop-blur transition-transform hover:scale-110">
-            <Play size={40} fill="currentColor" />
-          </span>
-        </button>
+      {/* Controles centrales (estilo MAX): atrasar · play/pausa · adelantar */}
+      {!buffering && !showEndScreen && (
+        <div className={`pointer-events-none absolute inset-0 flex items-center justify-center gap-10 sm:gap-16 ${controlsCls}`}>
+          <button onClick={() => skip(-10)}
+            className="pointer-events-auto grid h-14 w-14 place-items-center rounded-full text-white/90 transition hover:scale-110 hover:bg-white/10 hover:text-white sm:h-16 sm:w-16"
+            aria-label="Atrasar 10 segundos">
+            <RotateCcw size={40} strokeWidth={1.75} />
+          </button>
+          <button onClick={togglePlay}
+            className="pointer-events-auto grid h-20 w-20 place-items-center rounded-full bg-white/15 text-white backdrop-blur transition hover:scale-105 hover:bg-white/25 sm:h-24 sm:w-24"
+            aria-label={playing ? 'Pausar' : 'Reproducir'}>
+            {playing ? <Pause size={48} fill="currentColor" /> : <Play size={48} fill="currentColor" className="ml-1" />}
+          </button>
+          <button onClick={() => skip(10)}
+            className="pointer-events-auto grid h-14 w-14 place-items-center rounded-full text-white/90 transition hover:scale-110 hover:bg-white/10 hover:text-white sm:h-16 sm:w-16"
+            aria-label="Adelantar 10 segundos">
+            <RotateCw size={40} strokeWidth={1.75} />
+          </button>
+        </div>
       )}
 
       {/* Barra superior */}
@@ -385,20 +397,18 @@ export default function VideoPlayer({
         </div>
 
         {/* Botones */}
-        <div className="flex items-center gap-2 text-white sm:gap-4">
-          <button onClick={togglePlay} className="hover:text-brand">{playing ? <Pause size={26} /> : <Play size={26} />}</button>
-          <button onClick={() => skip(-10)} className="hover:text-brand" title="-10s"><RotateCcw size={20} /></button>
-          <button onClick={() => skip(10)} className="hover:text-brand" title="+10s"><RotateCw size={20} /></button>
+        <div className="flex items-center gap-3 text-white sm:gap-5">
+          <button onClick={togglePlay} className="hover:text-brand" aria-label={playing ? 'Pausar' : 'Reproducir'}>{playing ? <Pause size={30} /> : <Play size={30} fill="currentColor" />}</button>
           <div className="flex items-center gap-2">
-            <button onClick={toggleMute} className="hover:text-brand">{muted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}</button>
+            <button onClick={toggleMute} className="hover:text-brand">{muted || volume === 0 ? <VolumeX size={26} /> : <Volume2 size={26} />}</button>
             <input type="range" min={0} max={1} step="0.05" value={muted ? 0 : volume}
               onChange={(e) => changeVolume(Number(e.target.value))}
-              className="hidden h-1 w-20 cursor-pointer appearance-none rounded-full bg-gray-500 accent-white sm:block" />
+              className="hidden h-1 w-24 cursor-pointer appearance-none rounded-full bg-gray-500 accent-white sm:block" />
           </div>
-          <span className="whitespace-nowrap text-xs tabular-nums text-gray-200 sm:text-sm">{fmt(current)} / {fmt(duration)}</span>
+          <span className="whitespace-nowrap text-sm tabular-nums text-gray-200 sm:text-base">{fmt(current)} / {fmt(duration)}</span>
           <div className="flex-1" />
           <div className="relative">
-            <button onClick={() => setShowSettings((s) => !s)} className="hover:text-brand" title="Ajustes"><Settings size={22} /></button>
+            <button onClick={() => setShowSettings((s) => !s)} className="hover:text-brand" title="Ajustes"><Settings size={26} /></button>
             {showSettings && (
               <div className="absolute bottom-10 right-0 w-52 overflow-hidden rounded-lg bg-black/95 py-2 text-sm shadow-2xl">
                 <p className="px-4 pb-1 text-xs uppercase tracking-wide text-gray-400">Velocidad</p>
@@ -430,7 +440,7 @@ export default function VideoPlayer({
             )}
           </div>
           <button onClick={toggleFullscreen} className="hover:text-brand" title="Pantalla completa">
-            {isFullscreen ? <Minimize size={22} /> : <Maximize size={22} />}
+            {isFullscreen ? <Minimize size={26} /> : <Maximize size={26} />}
           </button>
         </div>
       </div>

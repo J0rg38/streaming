@@ -1,38 +1,67 @@
 // ----------------------------------------------------------------------------
-//  PlayerScreen — reproductor con expo-video. Usa streaming progresivo con
-//  Bearer token (fiable en móvil). Reanuda desde el progreso y lo va guardando.
+//  PlayerScreen — reproductor con expo-video y controles PROPIOS (estilo MAX).
 //
-//  Nota: el streaming ADAPTATIVO (HLS) en móvil requiere propagar el token a
-//  cada segmento; queda como mejora futura. El progresivo reproduce bien y
-//  soporta búsqueda por rangos.
+//  Usamos controles personalizados (no los nativos) para que el botón "atrás"
+//  y el resto de controles aparezcan y desaparezcan JUNTOS al tocar cualquier
+//  parte de la pantalla. Streaming progresivo con Bearer token (fiable en móvil),
+//  reanuda desde el progreso y lo va guardando.
 // ----------------------------------------------------------------------------
 import { useEffect, useRef, useState } from 'react';
-import { View, ActivityIndicator, TouchableOpacity, Text, StyleSheet } from 'react-native';
+import {
+  View, Text, TouchableOpacity, Pressable, ActivityIndicator,
+  PanResponder, StyleSheet,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { fetchMedia, streamUrl, authHeaders, fetchProgress, saveProgress } from '../api';
 
+const clamp01 = (x) => Math.max(0, Math.min(1, x || 0));
+
+function fmt(t) {
+  if (!Number.isFinite(t) || t < 0) return '0:00';
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const s = Math.floor(t % 60);
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${m}:${String(s).padStart(2, '0')}`;
+}
+
 export default function PlayerScreen({ route, navigation }) {
   const { mediaId, episodeId } = route.params;
   const insets = useSafeAreaInsets();
+
   const [source, setSource] = useState(null);
-  const [showBack, setShowBack] = useState(true);
+  const [showControls, setShowControls] = useState(true);
+  const [playing, setPlaying] = useState(true);
+  const [buffering, setBuffering] = useState(true);
+  const [pos, setPos] = useState(0);
+  const [dur, setDur] = useState(0);
+  const [scrub, setScrub] = useState(null); // ratio mientras se arrastra, o null
+
   const startAt = useRef(0);
   const lastPos = useRef(0);
   const hideTimer = useRef(null);
+  const playerRef = useRef(null);
+  const durRef = useRef(0);
+  const barWidth = useRef(1);
 
-  // Muestra el botón y programa su auto-ocultado (como los controles nativos).
-  const bumpBack = () => {
-    setShowBack(true);
-    clearTimeout(hideTimer.current);
-    hideTimer.current = setTimeout(() => setShowBack(false), 3500);
+  // --- Mostrar/ocultar controles (todo junto) -------------------------------
+  const clearHide = () => clearTimeout(hideTimer.current);
+  const scheduleHide = () => {
+    clearHide();
+    // Sólo se ocultan si el video está reproduciéndose (en pausa se quedan).
+    hideTimer.current = setTimeout(() => {
+      if (playerRef.current?.playing) setShowControls(false);
+    }, 3800);
   };
-  useEffect(() => {
-    bumpBack();
-    return () => clearTimeout(hideTimer.current);
-  }, []);
+  const revealControls = () => { setShowControls(true); scheduleHide(); };
+  const toggleControls = () => {
+    if (showControls) { clearHide(); setShowControls(false); }
+    else revealControls();
+  };
 
-  // Resolvemos la ruta del video y el punto donde reanudar.
+  // --- Resolver ruta del video y punto de reanudación -----------------------
   useEffect(() => {
     (async () => {
       const media = await fetchMedia(mediaId);
@@ -49,15 +78,39 @@ export default function PlayerScreen({ route, navigation }) {
     })().catch(console.warn);
   }, [mediaId, episodeId]);
 
-  // Crea el reproductor cuando ya hay fuente. Reanuda y reproduce.
+  // --- Crear el reproductor cuando hay fuente -------------------------------
   const player = useVideoPlayer(source, (p) => {
     if (!source) return;
-    p.volume = 1.0; // volumen al máximo por defecto
+    p.volume = 1.0;
     if (startAt.current > 0) p.currentTime = startAt.current;
     p.play();
   });
+  playerRef.current = player;
 
-  // Guardado de progreso periódico y al salir.
+  // Arranca con los controles visibles y programa su auto-ocultado.
+  useEffect(() => {
+    revealControls();
+    return clearHide;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // --- Sondeo de estado (posición, duración, play/buffer) -------------------
+  useEffect(() => {
+    if (!player) return;
+    const id = setInterval(() => {
+      try {
+        const d = player.duration || 0;
+        durRef.current = d;
+        setDur(d);
+        if (scrub == null) setPos(player.currentTime || 0);
+        setPlaying(!!player.playing);
+        setBuffering(player.status === 'loading');
+      } catch { /* noop */ }
+    }, 250);
+    return () => clearInterval(id);
+  }, [player, scrub]);
+
+  // --- Guardado de progreso --------------------------------------------------
   useEffect(() => {
     if (!player) return;
     const interval = setInterval(() => {
@@ -70,17 +123,53 @@ export default function PlayerScreen({ route, navigation }) {
     };
   }, [player, mediaId, episodeId]);
 
-  // Al salir: guarda el progreso actual y vuelve atrás.
+  // --- Acciones --------------------------------------------------------------
+  const togglePlay = () => {
+    const p = playerRef.current; if (!p) return;
+    if (p.playing) p.pause(); else p.play();
+    revealControls();
+  };
+  const skip = (delta) => {
+    const p = playerRef.current; if (!p) return;
+    const next = Math.max(0, Math.min(durRef.current || Infinity, (p.currentTime || 0) + delta));
+    p.currentTime = next;
+    setPos(next);
+    revealControls();
+  };
   const goBack = () => {
-    const t = player?.currentTime || 0;
+    const p = playerRef.current;
+    const t = p?.currentTime || 0;
     if (t > 0) saveProgress(mediaId, episodeId, t);
     navigation.goBack();
   };
 
+  // --- Barra de progreso arrastrable (PanResponder, sin dependencias) -------
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (e) => {
+        clearHide();
+        setScrub(clamp01(e.nativeEvent.locationX / barWidth.current));
+      },
+      onPanResponderMove: (e) => {
+        setScrub(clamp01(e.nativeEvent.locationX / barWidth.current));
+      },
+      onPanResponderRelease: (e) => {
+        const r = clamp01(e.nativeEvent.locationX / barWidth.current);
+        const p = playerRef.current;
+        if (p && durRef.current) { p.currentTime = r * durRef.current; setPos(r * durRef.current); }
+        setScrub(null);
+        scheduleHide();
+      },
+      onPanResponderTerminate: () => { setScrub(null); scheduleHide(); },
+    }),
+  ).current;
+
   if (!source) {
     return (
       <View style={styles.center}>
-        <TouchableOpacity style={[styles.back, { top: insets.top + 10 }]} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={[styles.back, { top: insets.top + 10 }]} onPress={() => navigation.goBack()} hitSlop={12}>
           <Text style={styles.backTxt}>‹</Text>
         </TouchableOpacity>
         <ActivityIndicator color="#E35336" size="large" />
@@ -88,32 +177,72 @@ export default function PlayerScreen({ route, navigation }) {
     );
   }
 
+  const shownPos = scrub != null ? scrub * dur : pos;
+  const pct = dur ? clamp01(shownPos / dur) * 100 : 0;
+
   return (
     <View style={styles.container}>
       <VideoView
         style={StyleSheet.absoluteFill}
         player={player}
-        nativeControls
-        allowsFullscreen
+        nativeControls={false}
         contentFit="contain"
       />
 
-      {/* Zona táctil superior: al tocar, reaparece el botón (los controles
-          nativos aparecen al tocar el centro/abajo del video). */}
-      <TouchableOpacity
-        activeOpacity={1}
-        style={styles.tapZone}
-        onPress={bumpBack}
-      />
+      {/* Captura de toques en TODA la pantalla: muestra/oculta los controles */}
+      <Pressable style={StyleSheet.absoluteFill} onPress={toggleControls} />
 
-      {showBack && (
-        <TouchableOpacity
-          style={[styles.back, { top: insets.top + 10 }]}
-          onPress={goBack}
-          hitSlop={12}
-        >
-          <Text style={styles.backTxt}>‹</Text>
-        </TouchableOpacity>
+      {/* Spinner de carga (siempre visible durante el buffering) */}
+      {buffering && (
+        <View style={styles.spinner} pointerEvents="none">
+          <ActivityIndicator color="#fff" size="large" />
+        </View>
+      )}
+
+      {showControls && (
+        <>
+          {/* Oscurecido para dar contraste a los controles */}
+          <View style={styles.scrim} pointerEvents="none" />
+
+          {/* Barra superior: botón atrás */}
+          <View style={[styles.topBar, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
+            <TouchableOpacity style={styles.back} onPress={goBack} hitSlop={12}>
+              <Text style={styles.backTxt}>‹</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Controles centrales: atrasar · play/pausa · adelantar */}
+          <View style={styles.centerRow} pointerEvents="box-none">
+            <TouchableOpacity style={styles.sideBtn} onPress={() => skip(-10)} hitSlop={10}>
+              <Text style={styles.sideIcon}>⟲</Text>
+              <Text style={styles.sideNum}>10</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.playBtn} onPress={togglePlay} hitSlop={10}>
+              <Text style={styles.playIcon}>{playing ? '❚❚' : '►'}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.sideBtn} onPress={() => skip(10)} hitSlop={10}>
+              <Text style={styles.sideIcon}>⟳</Text>
+              <Text style={styles.sideNum}>10</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Barra inferior: progreso + tiempos */}
+          <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 10 }]} pointerEvents="box-none">
+            <Text style={styles.time}>{fmt(shownPos)}</Text>
+            <View
+              style={styles.track}
+              onLayout={(e) => { barWidth.current = e.nativeEvent.layout.width || 1; }}
+              {...pan.panHandlers}
+            >
+              <View style={styles.trackBg} />
+              <View style={[styles.trackFill, { width: `${pct}%` }]} />
+              <View style={[styles.thumb, { left: `${pct}%` }]} />
+            </View>
+            <Text style={styles.time}>{fmt(dur)}</Text>
+          </View>
+        </>
       )}
     </View>
   );
@@ -122,12 +251,42 @@ export default function PlayerScreen({ route, navigation }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   center: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
-  tapZone: { position: 'absolute', top: 0, left: 0, right: 0, height: 90, zIndex: 15 },
+  spinner: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.35)' },
+
+  topBar: { position: 'absolute', top: 0, left: 0, right: 0, paddingHorizontal: 14, paddingBottom: 8 },
   back: {
-    position: 'absolute', left: 14, zIndex: 20,
-    width: 44, height: 44, borderRadius: 22,
+    position: 'absolute', left: 14,
+    width: 46, height: 46, borderRadius: 23,
     backgroundColor: 'rgba(0,0,0,0.55)',
     alignItems: 'center', justifyContent: 'center',
   },
-  backTxt: { color: '#fff', fontSize: 30, lineHeight: 32, marginTop: -2, fontWeight: '600' },
+  backTxt: { color: '#fff', fontSize: 32, lineHeight: 34, marginTop: -3, fontWeight: '600' },
+
+  centerRow: {
+    ...StyleSheet.absoluteFillObject,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 44,
+  },
+  sideBtn: { alignItems: 'center', justifyContent: 'center', width: 70, height: 70 },
+  sideIcon: { color: '#fff', fontSize: 42, lineHeight: 46, fontWeight: '300' },
+  sideNum: { color: '#fff', fontSize: 13, fontWeight: '700', marginTop: -6 },
+  playBtn: {
+    width: 84, height: 84, borderRadius: 42,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  playIcon: { color: '#fff', fontSize: 34, lineHeight: 38, fontWeight: '700' },
+
+  bottomBar: {
+    position: 'absolute', left: 0, right: 0, bottom: 0,
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, gap: 12,
+  },
+  time: { color: '#fff', fontSize: 13, fontWeight: '600', width: 52, textAlign: 'center' },
+  track: { flex: 1, height: 26, justifyContent: 'center' },
+  trackBg: { position: 'absolute', left: 0, right: 0, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.3)' },
+  trackFill: { position: 'absolute', left: 0, height: 4, borderRadius: 2, backgroundColor: '#E35336' },
+  thumb: {
+    position: 'absolute', width: 14, height: 14, borderRadius: 7,
+    backgroundColor: '#E35336', marginLeft: -7,
+  },
 });
