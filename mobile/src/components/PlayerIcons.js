@@ -51,3 +51,27 @@ export function RotateCwIcon({ size = 40, color = '#fff', strokeWidth = 1.9 }) {
     </Svg>
   );
 }
+
+// Expandir (lucide maximize) — rellenar pantalla.
+export function MaximizeIcon({ size = 24, color = '#fff', strokeWidth = 2 }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path d="M8 3H5a2 2 0 0 0-2 2v3" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M21 8V5a2 2 0 0 0-2-2h-3" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M3 16v3a2 2 0 0 0 2 2h3" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M16 21h3a2 2 0 0 0 2-2v-3" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+// Ajustar (lucide minimize) — encajar el video completo.
+export function MinimizeIcon({ size = 24, color = '#fff', strokeWidth = 2 }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path d="M8 3v3a2 2 0 0 1-2 2H3" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M21 8h-3a2 2 0 0 1-2-2V3" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M3 16h3a2 2 0 0 1 2 2v3" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M16 21v-3a2 2 0 0 1 2-2h3" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
