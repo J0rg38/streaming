@@ -3,13 +3,14 @@
 // ----------------------------------------------------------------------------
 import { useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, ActivityIndicator,
+  View, Text, TextInput, ActivityIndicator,
   KeyboardAvoidingView, Platform, StyleSheet,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useAuth } from '../auth';
 import Logo from '../components/Logo';
 import AuthBackground from '../components/AuthBackground';
+import Focusable from '../components/Focusable';
 import { MailIcon, LockIcon, LogInIcon } from '../components/Icons';
 
 export default function LoginScreen() {
@@ -66,11 +67,11 @@ export default function LoginScreen() {
             />
           </View>
 
-          <TouchableOpacity style={styles.button} onPress={onSubmit} disabled={loading} activeOpacity={0.85}>
+          <Focusable style={styles.button} onPress={onSubmit} disabled={loading} ring={false} focusStyle={styles.buttonFocus}>
             {loading
               ? <ActivityIndicator color="#fff" />
               : (<><LogInIcon size={18} /><Text style={styles.buttonText}>Entrar</Text></>)}
-          </TouchableOpacity>
+          </Focusable>
         </View>
       </KeyboardAvoidingView>
     </View>
@@ -116,4 +117,5 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   buttonText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  buttonFocus: { borderWidth: 2, borderColor: '#fff' },
 });

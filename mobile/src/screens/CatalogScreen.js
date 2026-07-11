@@ -2,12 +2,13 @@
 //  CatalogScreen — catálogo con carruseles (estilo Netflix) por género.
 // ----------------------------------------------------------------------------
 import { useEffect, useState } from 'react';
-import { View, Text, FlatList, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, FlatList, ActivityIndicator, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchCatalog } from '../api';
 import { useAuth } from '../auth';
 import Logo from '../components/Logo';
 import Rail from '../components/Rail';
+import Focusable from '../components/Focusable';
 import { DownloadIcon } from '../components/Icons';
 
 export default function CatalogScreen({ navigation }) {
@@ -38,14 +39,14 @@ export default function CatalogScreen({ navigation }) {
           <Text style={styles.logo}>MI VOD</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-          <TouchableOpacity onPress={() => navigation.navigate('Search')}><Text style={styles.link}>Buscar</Text></TouchableOpacity>
-          <TouchableOpacity onPress={() => navigation.navigate('Downloads')} hitSlop={8}><DownloadIcon size={22} color="#ddd" /></TouchableOpacity>
+          <Focusable onPress={() => navigation.navigate('Search')} style={styles.headerBtn}><Text style={styles.link}>Buscar</Text></Focusable>
+          <Focusable onPress={() => navigation.navigate('Downloads')} style={styles.headerBtn}><DownloadIcon size={22} color="#ddd" /></Focusable>
           {user?.adult && (
-            <TouchableOpacity onPress={() => navigation.navigate('Adult')} style={styles.adultBtn}>
+            <Focusable onPress={() => navigation.navigate('Adult')} style={styles.adultBtn}>
               <Text style={styles.adultTxt}>+18</Text>
-            </TouchableOpacity>
+            </Focusable>
           )}
-          <TouchableOpacity onPress={signOut}><Text style={styles.link}>Salir</Text></TouchableOpacity>
+          <Focusable onPress={signOut} style={styles.headerBtn}><Text style={styles.link}>Salir</Text></Focusable>
         </View>
       </View>
 
@@ -68,6 +69,7 @@ const styles = StyleSheet.create({
   center: { flex: 1, backgroundColor: '#141414', justifyContent: 'center', alignItems: 'center' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 14, backgroundColor: '#141414', zIndex: 10, elevation: 4 },
   logo: { color: '#E35336', fontSize: 22, fontWeight: '800' },
+  headerBtn: { paddingHorizontal: 6, paddingVertical: 4, borderRadius: 8 },
   link: { color: '#ddd', fontSize: 15 },
   adultBtn: { backgroundColor: 'rgba(227,83,54,0.2)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 3 },
   adultTxt: { color: '#E35336', fontSize: 13, fontWeight: '700' },

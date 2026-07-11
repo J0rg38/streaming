@@ -17,10 +17,13 @@ import * as NavigationBar from 'expo-navigation-bar';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { fetchMedia, streamUrl, authHeaders, fetchProgress, saveProgress, imageSource } from '../api';
 import { getLocalProgress, saveLocalProgress } from '../progress';
+import Focusable from '../components/Focusable';
 import {
   PlayIcon, PauseIcon, ChevronLeftIcon, RotateCcwIcon, RotateCwIcon,
   MaximizeIcon, MinimizeIcon,
 } from '../components/PlayerIcons';
+
+const IS_TV = Platform.isTV === true;
 
 const clamp01 = (x) => Math.max(0, Math.min(1, x || 0));
 
@@ -80,11 +83,15 @@ export default function PlayerScreen({ route, navigation }) {
   const playerRef = useRef(null);
   const durRef = useRef(0);
   const barWidth = useRef(1);
+  const trackRef = useRef(null);
+  const trackX = useRef(0); // posición absoluta (en ventana) del borde izq. del track
 
   // --- Mostrar/ocultar controles (todo junto) -------------------------------
   const clearHide = () => clearTimeout(hideTimer.current);
   const scheduleHide = () => {
     clearHide();
+    // En TV NO se auto-ocultan (con el control remoto haría imposible navegar).
+    if (IS_TV) return;
     // Sólo se ocultan si el video está reproduciéndose (en pausa se quedan).
     hideTimer.current = setTimeout(() => {
       if (playerRef.current?.playing) setShowControls(false);
@@ -235,9 +242,16 @@ export default function PlayerScreen({ route, navigation }) {
   };
 
   // --- Barra de progreso arrastrable (PanResponder, sin dependencias) -------
-  //  Con captura del gesto para que responda de forma fiable al primer toque
-  //  y no lo intercepte la capa de fondo que muestra/oculta los controles.
-  const ratioAt = (e) => clamp01(e.nativeEvent.locationX / barWidth.current);
+  //  Usa coordenadas ABSOLUTAS de pantalla (gestureState) respecto al borde
+  //  del track, no locationX (que es relativo al hijo bajo el dedo y hacía
+  //  saltar el valor al inicio al pasar sobre el thumb/la barra).
+  const measureTrack = () => {
+    trackRef.current?.measureInWindow((x, _y, w) => {
+      trackX.current = x;
+      if (w) barWidth.current = w;
+    });
+  };
+  const ratioFromX = (absX) => clamp01((absX - trackX.current) / (barWidth.current || 1));
   const pan = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
@@ -245,10 +259,10 @@ export default function PlayerScreen({ route, navigation }) {
       onMoveShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponderCapture: () => true,
       onPanResponderTerminationRequest: () => false,
-      onPanResponderGrant: (e) => { clearHide(); setScrub(ratioAt(e)); },
-      onPanResponderMove: (e) => { setScrub(ratioAt(e)); },
-      onPanResponderRelease: (e) => {
-        const r = ratioAt(e);
+      onPanResponderGrant: (e, g) => { clearHide(); measureTrack(); setScrub(ratioFromX(g.x0)); },
+      onPanResponderMove: (e, g) => { setScrub(ratioFromX(g.moveX)); },
+      onPanResponderRelease: (e, g) => {
+        const r = ratioFromX(g.moveX);
         const p = playerRef.current;
         if (p && durRef.current) { p.currentTime = r * durRef.current; setPos(r * durRef.current); }
         setScrub(null);
@@ -321,33 +335,35 @@ export default function PlayerScreen({ route, navigation }) {
 
           {/* Barra superior: atrás (izq) + ajustar/expandir imagen (der) */}
           <View style={styles.topBar} pointerEvents="box-none">
-            <TouchableOpacity style={[styles.back, { top: insets.top + 8 }]} onPress={goBack} hitSlop={12}>
+            <Focusable style={[styles.back, { top: insets.top + 8 }]} onPress={goBack} hitSlop={12} ring={false} focusStyle={styles.focusRound}>
               <ChevronLeftIcon size={30} />
-            </TouchableOpacity>
-            <TouchableOpacity
+            </Focusable>
+            <Focusable
               style={[styles.fitBtn, { top: insets.top + 8 }]}
               onPress={() => { setFit((f) => (f === 'contain' ? 'cover' : 'contain')); revealControls(); }}
               hitSlop={12}
+              ring={false}
+              focusStyle={styles.focusRound}
             >
               {fit === 'contain' ? <MaximizeIcon size={22} /> : <MinimizeIcon size={22} />}
-            </TouchableOpacity>
+            </Focusable>
           </View>
 
           {/* Controles centrales: atrasar · play/pausa · adelantar */}
           <View style={styles.centerRow} pointerEvents="box-none">
-            <TouchableOpacity style={styles.sideBtn} onPress={() => skip(-10)} hitSlop={10}>
+            <Focusable style={styles.sideBtn} onPress={() => skip(-10)} hitSlop={10} ring={false} focusStyle={styles.focusSide} focusScale={1.12}>
               <RotateCcwIcon size={46} />
               <View style={styles.sideNumWrap} pointerEvents="none"><Text style={styles.sideNum}>10</Text></View>
-            </TouchableOpacity>
+            </Focusable>
 
-            <TouchableOpacity style={styles.playBtn} onPress={togglePlay} hitSlop={10}>
+            <Focusable style={styles.playBtn} onPress={togglePlay} hitSlop={10} hasTVPreferredFocus ring={false} focusStyle={styles.focusPlay} focusScale={1.1}>
               {playing ? <PauseIcon size={40} /> : <PlayIcon size={40} />}
-            </TouchableOpacity>
+            </Focusable>
 
-            <TouchableOpacity style={styles.sideBtn} onPress={() => skip(10)} hitSlop={10}>
+            <Focusable style={styles.sideBtn} onPress={() => skip(10)} hitSlop={10} ring={false} focusStyle={styles.focusSide} focusScale={1.12}>
               <RotateCwIcon size={46} />
               <View style={styles.sideNumWrap} pointerEvents="none"><Text style={styles.sideNum}>10</Text></View>
-            </TouchableOpacity>
+            </Focusable>
           </View>
 
           {/* Preview de miniaturas mientras se arrastra (estilo web) */}
@@ -367,8 +383,9 @@ export default function PlayerScreen({ route, navigation }) {
           <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 8 }]} pointerEvents="box-none">
             <Text style={styles.time}>{fmt(shownPos)}</Text>
             <View
+              ref={trackRef}
               style={styles.track}
-              onLayout={(e) => { barWidth.current = e.nativeEvent.layout.width || 1; }}
+              onLayout={(e) => { barWidth.current = e.nativeEvent.layout.width || 1; measureTrack(); }}
               {...pan.panHandlers}
             >
               <View style={styles.trackBg} />
@@ -415,6 +432,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center', justifyContent: 'center',
   },
+  // Estilos de FOCO (control remoto / Android TV) para botones redondos.
+  focusRound: { borderWidth: 2, borderColor: '#E35336', borderRadius: 23 },
+  focusSide: { backgroundColor: 'rgba(227,83,54,0.28)', borderRadius: 35 },
+  focusPlay: { borderWidth: 3, borderColor: '#E35336', backgroundColor: 'rgba(227,83,54,0.25)' },
 
   bottomBar: {
     position: 'absolute', left: 0, right: 0, bottom: 0,

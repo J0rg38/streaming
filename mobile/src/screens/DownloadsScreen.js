@@ -4,11 +4,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
-  View, Text, Image, FlatList, TouchableOpacity, Alert, StyleSheet,
+  View, Text, Image, FlatList, Alert, StyleSheet,
 } from 'react-native';
 import { listDownloads, deleteDownload, formatBytes } from '../downloads';
 import { useDownloads } from '../downloadsContext';
 import { imageSource } from '../api';
+import Focusable from '../components/Focusable';
 import { PlayFilledIcon, TrashIcon, XIcon, DownloadCloudIcon } from '../components/Icons';
 
 export default function DownloadsScreen({ navigation }) {
@@ -79,16 +80,16 @@ export default function DownloadsScreen({ navigation }) {
                   </View>
                 </View>
               </View>
-              <TouchableOpacity style={styles.trashBtn} onPress={() => cancelDownload(d.key)} hitSlop={8}>
+              <Focusable style={styles.trashBtn} onPress={() => cancelDownload(d.key)} hitSlop={8}>
                 <XIcon size={20} color="#bbb" />
-              </TouchableOpacity>
+              </Focusable>
             </View>
           );
         }
 
         return (
           <View style={styles.row}>
-            <TouchableOpacity style={styles.rowMain} onPress={() => play(d)} activeOpacity={0.7}>
+            <Focusable style={styles.rowMain} onPress={() => play(d)} activeOpacity={0.7}>
               <Image source={d.posterUri ? { uri: d.posterUri } : undefined} style={styles.poster} />
               <View style={styles.info}>
                 <Text style={styles.title} numberOfLines={2}>{d.title}</Text>
@@ -99,10 +100,10 @@ export default function DownloadsScreen({ navigation }) {
                 </View>
               </View>
               <View style={styles.playChip}><PlayFilledIcon size={16} color="#000" /></View>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.trashBtn} onPress={() => remove(d)} hitSlop={8}>
+            </Focusable>
+            <Focusable style={styles.trashBtn} onPress={() => remove(d)} hitSlop={8}>
               <TrashIcon size={20} color="#bbb" />
-            </TouchableOpacity>
+            </Focusable>
           </View>
         );
       }}

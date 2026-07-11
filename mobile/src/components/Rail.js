@@ -1,22 +1,23 @@
 // ----------------------------------------------------------------------------
 //  Rail.js — Carrusel horizontal de portadas (reutilizable).
 // ----------------------------------------------------------------------------
-import { View, Text, FlatList, Image, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, FlatList, Image, StyleSheet } from 'react-native';
 import { imageSource } from '../api';
 import { useDownloads } from '../downloadsContext';
 import { DownloadCloudIcon } from './Icons';
+import Focusable from './Focusable';
 
 export function Poster({ item, onPress }) {
   const { ids } = useDownloads();
   const downloaded = ids.has(item.id);
   return (
-    <TouchableOpacity style={styles.card} onPress={() => onPress(item)}>
+    <Focusable style={styles.card} onPress={() => onPress(item)}>
       <Image source={imageSource(item.poster_url)} style={styles.poster} />
       <View style={styles.titleRow}>
         {downloaded && <DownloadCloudIcon size={14} color="#4ade80" />}
         <Text numberOfLines={1} style={styles.cardTitle}>{item.title}</Text>
       </View>
-    </TouchableOpacity>
+    </Focusable>
   );
 }
 

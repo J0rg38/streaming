@@ -3,9 +3,10 @@
 //  selector de temporada y lista de capítulos (cada uno con su descarga).
 // ----------------------------------------------------------------------------
 import { useEffect, useMemo, useState } from 'react';
-import { View, Text, Image, ScrollView, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, Image, ScrollView, ActivityIndicator, StyleSheet } from 'react-native';
 import { fetchMedia, imageSource } from '../api';
 import DownloadButton from '../components/DownloadButton';
+import Focusable from '../components/Focusable';
 import { PlayFilledIcon } from '../components/Icons';
 
 export default function TitleScreen({ route, navigation }) {
@@ -42,10 +43,10 @@ export default function TitleScreen({ route, navigation }) {
 
         {media.type === 'movie' ? (
           <>
-            <TouchableOpacity style={styles.playBtn} onPress={playMovie}>
+            <Focusable style={styles.playBtn} onPress={playMovie} hasTVPreferredFocus>
               <PlayFilledIcon size={18} color="#000" />
               <Text style={styles.playText}>Reproducir</Text>
-            </TouchableOpacity>
+            </Focusable>
             <DownloadButton
               variant="full"
               item={{ mediaId: media.id, title: media.title, posterUrl: media.poster_url, videoPath: media.video_path }}
@@ -57,19 +58,19 @@ export default function TitleScreen({ route, navigation }) {
             {/* Selector de temporada */}
             <View style={styles.seasonRow}>
               {media.seasons?.map((s) => (
-                <TouchableOpacity key={s.season} onPress={() => setSeason(s.season)}
+                <Focusable key={s.season} onPress={() => setSeason(s.season)}
                   style={[styles.seasonChip, season === s.season && styles.seasonChipActive]}>
                   <Text style={season === s.season ? styles.seasonTextActive : styles.seasonText}>Temporada {s.season}</Text>
-                </TouchableOpacity>
+                </Focusable>
               ))}
             </View>
             {/* Capítulos */}
             {episodes.map((ep) => (
               <View key={ep.id} style={styles.epRow}>
-                <TouchableOpacity style={styles.epMain} onPress={() => playEpisode(ep)} activeOpacity={0.7}>
+                <Focusable style={styles.epMain} onPress={() => playEpisode(ep)}>
                   <Text style={styles.epNum}>{ep.episode_number}</Text>
                   <Text style={styles.epTitle} numberOfLines={1}>{ep.title || `Capítulo ${ep.episode_number}`}</Text>
-                </TouchableOpacity>
+                </Focusable>
                 <DownloadButton
                   variant="compact"
                   item={{
@@ -79,9 +80,9 @@ export default function TitleScreen({ route, navigation }) {
                   }}
                   onStarted={() => navigation.navigate('Downloads')}
                 />
-                <TouchableOpacity onPress={() => playEpisode(ep)} hitSlop={8}>
+                <Focusable onPress={() => playEpisode(ep)} style={styles.epPlayBtn}>
                   <PlayFilledIcon size={15} color="#E35336" />
-                </TouchableOpacity>
+                </Focusable>
               </View>
             ))}
           </>
@@ -107,4 +108,5 @@ const styles = StyleSheet.create({
   epMain: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
   epNum: { color: '#888', width: 28, fontSize: 16, fontWeight: '700' },
   epTitle: { color: '#fff', flex: 1 },
+  epPlayBtn: { padding: 6, borderRadius: 8 },
 });

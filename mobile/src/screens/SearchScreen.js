@@ -2,9 +2,10 @@
 //  SearchScreen — búsqueda por título, género o actor (con similares).
 // ----------------------------------------------------------------------------
 import { useEffect, useState } from 'react';
-import { View, TextInput, FlatList, Image, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, TextInput, FlatList, Image, Text, StyleSheet } from 'react-native';
 import { searchMedia, imageSource } from '../api';
 import { useDownloads } from '../downloadsContext';
+import Focusable from '../components/Focusable';
 import { DownloadCloudIcon } from '../components/Icons';
 
 export default function SearchScreen({ navigation }) {
@@ -31,13 +32,13 @@ export default function SearchScreen({ navigation }) {
         data={results} keyExtractor={(m) => String(m.id)} numColumns={3}
         columnWrapperStyle={{ gap: 8 }} contentContainerStyle={{ gap: 8, paddingTop: 12 }}
         renderItem={({ item }) => (
-          <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('Title', { id: item.id })}>
+          <Focusable style={styles.card} onPress={() => navigation.navigate('Title', { id: item.id })}>
             <Image source={imageSource(item.poster_url)} style={styles.poster} />
             <View style={styles.titleRow}>
               {ids.has(item.id) && <DownloadCloudIcon size={13} color="#4ade80" />}
               <Text numberOfLines={1} style={styles.title}>{item.title}</Text>
             </View>
-          </TouchableOpacity>
+          </Focusable>
         )}
       />
     </View>

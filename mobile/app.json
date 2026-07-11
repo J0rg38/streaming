@@ -6,13 +6,43 @@
     "orientation": "default",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#141414",
+    "icon": "./assets/icon.png",
+    "runtimeVersion": { "policy": "appVersion" },
+    "updates": {
+      "url": "https://u.expo.dev/33356417-4a8b-4896-9dac-304d42158e3a"
+    },
     "splash": {
+      "image": "./assets/splash-icon.png",
       "backgroundColor": "#141414",
       "resizeMode": "contain"
     },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "android": {
-      "package": "com.mivod.app"
+      "package": "com.mivod.app",
+      "versionCode": 2,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#141414"
+      }
     },
-    "plugins": ["expo-secure-store", "expo-video"]
+    "plugins": [
+      "expo-secure-store",
+      "expo-video",
+      [
+        "@react-native-tvos/config-tv",
+        {
+          "androidTVBanner": "./assets/tv-banner.png",
+          "androidTVRequired": false
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "33356417-4a8b-4896-9dac-304d42158e3a"
+      }
+    },
+    "owner": "j0rg38"
   }
 }
