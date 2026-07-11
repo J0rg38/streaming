@@ -308,6 +308,12 @@ export default function VideoPlayer({
         autoPlay
       />
 
+      {/* Capa para cerrar el menú de ajustes al hacer clic fuera (sin pausar).
+          Va justo sobre el video pero debajo de los controles/menú. */}
+      {showSettings && (
+        <div className="absolute inset-0" onClick={() => setShowSettings(false)} />
+      )}
+
       {/* Spinner de carga */}
       {buffering && !showEndScreen && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center">

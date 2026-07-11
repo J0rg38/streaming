@@ -9,11 +9,16 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, Pressable, ActivityIndicator,
-  PanResponder, StyleSheet,
+  PanResponder, Platform, StyleSheet,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
+import * as NavigationBar from 'expo-navigation-bar';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { fetchMedia, streamUrl, authHeaders, fetchProgress, saveProgress } from '../api';
+import {
+  PlayIcon, PauseIcon, ChevronLeftIcon, RotateCcwIcon, RotateCwIcon,
+} from '../components/PlayerIcons';
 
 const clamp01 = (x) => Math.max(0, Math.min(1, x || 0));
 
@@ -94,6 +99,17 @@ export default function PlayerScreen({ route, navigation }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Modo inmersivo Android: oculta la barra de navegación inferior (se puede
+  // recuperar deslizando desde el borde). Se restaura al salir del reproductor.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    NavigationBar.setVisibilityAsync('hidden').catch(() => {});
+    NavigationBar.setBehaviorAsync('overlay-swipe').catch(() => {});
+    return () => {
+      NavigationBar.setVisibilityAsync('visible').catch(() => {});
+    };
+  }, []);
+
   // --- Sondeo de estado (posición, duración, play/buffer) -------------------
   useEffect(() => {
     if (!player) return;
@@ -169,8 +185,9 @@ export default function PlayerScreen({ route, navigation }) {
   if (!source) {
     return (
       <View style={styles.center}>
+        <StatusBar hidden />
         <TouchableOpacity style={[styles.back, { top: insets.top + 10 }]} onPress={() => navigation.goBack()} hitSlop={12}>
-          <Text style={styles.backTxt}>‹</Text>
+          <ChevronLeftIcon size={30} />
         </TouchableOpacity>
         <ActivityIndicator color="#E35336" size="large" />
       </View>
@@ -182,6 +199,9 @@ export default function PlayerScreen({ route, navigation }) {
 
   return (
     <View style={styles.container}>
+      {/* Oculta la barra de estado de Android (batería, hora, notificaciones) */}
+      <StatusBar hidden />
+
       <VideoView
         style={StyleSheet.absoluteFill}
         player={player}
@@ -205,26 +225,26 @@ export default function PlayerScreen({ route, navigation }) {
           <View style={styles.scrim} pointerEvents="none" />
 
           {/* Barra superior: botón atrás */}
-          <View style={[styles.topBar, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
-            <TouchableOpacity style={styles.back} onPress={goBack} hitSlop={12}>
-              <Text style={styles.backTxt}>‹</Text>
+          <View style={styles.topBar} pointerEvents="box-none">
+            <TouchableOpacity style={[styles.back, { top: insets.top + 8 }]} onPress={goBack} hitSlop={12}>
+              <ChevronLeftIcon size={30} />
             </TouchableOpacity>
           </View>
 
           {/* Controles centrales: atrasar · play/pausa · adelantar */}
           <View style={styles.centerRow} pointerEvents="box-none">
             <TouchableOpacity style={styles.sideBtn} onPress={() => skip(-10)} hitSlop={10}>
-              <Text style={styles.sideIcon}>⟲</Text>
-              <Text style={styles.sideNum}>10</Text>
+              <RotateCcwIcon size={46} />
+              <View style={styles.sideNumWrap} pointerEvents="none"><Text style={styles.sideNum}>10</Text></View>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.playBtn} onPress={togglePlay} hitSlop={10}>
-              <Text style={styles.playIcon}>{playing ? '❚❚' : '►'}</Text>
+              {playing ? <PauseIcon size={40} /> : <PlayIcon size={40} />}
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.sideBtn} onPress={() => skip(10)} hitSlop={10}>
-              <Text style={styles.sideIcon}>⟳</Text>
-              <Text style={styles.sideNum}>10</Text>
+              <RotateCwIcon size={46} />
+              <View style={styles.sideNumWrap} pointerEvents="none"><Text style={styles.sideNum}>10</Text></View>
             </TouchableOpacity>
           </View>
 
@@ -261,21 +281,19 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.55)',
     alignItems: 'center', justifyContent: 'center',
   },
-  backTxt: { color: '#fff', fontSize: 32, lineHeight: 34, marginTop: -3, fontWeight: '600' },
 
   centerRow: {
     ...StyleSheet.absoluteFillObject,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 44,
   },
   sideBtn: { alignItems: 'center', justifyContent: 'center', width: 70, height: 70 },
-  sideIcon: { color: '#fff', fontSize: 42, lineHeight: 46, fontWeight: '300' },
-  sideNum: { color: '#fff', fontSize: 13, fontWeight: '700', marginTop: -6 },
+  sideNumWrap: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  sideNum: { color: '#fff', fontSize: 12, fontWeight: '800' },
   playBtn: {
     width: 84, height: 84, borderRadius: 42,
     backgroundColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center', justifyContent: 'center',
   },
-  playIcon: { color: '#fff', fontSize: 34, lineHeight: 38, fontWeight: '700' },
 
   bottomBar: {
     position: 'absolute', left: 0, right: 0, bottom: 0,
