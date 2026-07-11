@@ -46,6 +46,7 @@ export default function PlayerScreen({ route, navigation }) {
   const [scrub, setScrub] = useState(null); // ratio mientras se arrastra, o null
 
   const startAt = useRef(0);
+  const seeked = useRef(false);   // ya se aplicó el salto de reanudación
   const lastPos = useRef(0);
   const hideTimer = useRef(null);
   const playerRef = useRef(null);
@@ -91,6 +92,7 @@ export default function PlayerScreen({ route, navigation }) {
       ]);
       if (cancelled) return;
       startAt.current = Math.max(srv?.stopped_at || 0, loc || 0);
+      seeked.current = false; // el salto se aplicará cuando el video esté listo
       setSource(src);
     })().catch(console.warn);
     return () => { cancelled = true; };
@@ -100,8 +102,9 @@ export default function PlayerScreen({ route, navigation }) {
   const player = useVideoPlayer(source, (p) => {
     if (!source) return;
     p.volume = 1.0;
-    if (startAt.current > 0) p.currentTime = startAt.current;
     p.play();
+    // El salto de reanudación NO se hace aquí (el video aún no tiene metadatos);
+    // se aplica en el sondeo, en cuanto se conoce la duración.
   });
   playerRef.current = player;
 
@@ -131,7 +134,18 @@ export default function PlayerScreen({ route, navigation }) {
         const d = player.duration || 0;
         durRef.current = d;
         setDur(d);
-        if (scrub == null) setPos(player.currentTime || 0);
+
+        // Reanudación: en cuanto el video tiene duración (metadatos listos),
+        // saltamos UNA vez al punto guardado. Fiable en streaming y offline.
+        if (!seeked.current && d > 0) {
+          seeked.current = true;
+          const target = startAt.current;
+          if (target > 1 && target < d - 2) { player.currentTime = target; }
+        }
+
+        const cur = player.currentTime || 0;
+        if (cur > 0) lastPos.current = cur; // siempre fresco para guardar al salir
+        if (scrub == null) setPos(cur);
         setPlaying(!!player.playing);
         setBuffering(player.status === 'loading');
       } catch { /* noop */ }

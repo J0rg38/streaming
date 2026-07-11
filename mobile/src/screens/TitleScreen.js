@@ -49,6 +49,7 @@ export default function TitleScreen({ route, navigation }) {
             <DownloadButton
               variant="full"
               item={{ mediaId: media.id, title: media.title, posterUrl: media.poster_url, videoPath: media.video_path }}
+              onStarted={() => navigation.navigate('Downloads')}
             />
           </>
         ) : (
@@ -76,6 +77,7 @@ export default function TitleScreen({ route, navigation }) {
                     title: media.title, subtitle: `T${ep.season_number}:E${ep.episode_number}`,
                     posterUrl: media.poster_url, videoPath: ep.video_path,
                   }}
+                  onStarted={() => navigation.navigate('Downloads')}
                 />
                 <TouchableOpacity onPress={() => playEpisode(ep)} hitSlop={8}>
                   <PlayFilledIcon size={15} color="#E35336" />

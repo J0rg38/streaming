@@ -1,60 +1,55 @@
 // ----------------------------------------------------------------------------
-//  DownloadButton — control de descarga reutilizable (película o capítulo).
+//  DownloadButton — control de descarga (película o capítulo).
+//  La descarga la gestiona el contexto global; aquí solo se refleja el estado.
 //
 //  props:
-//    item    = { mediaId, episodeId?, title, subtitle?, posterUrl, videoPath }
-//    variant = 'full'    → botón grande con barra de progreso (películas)
-//              'compact' → icono compacto (filas de capítulos)
+//    item     = { mediaId, episodeId?, title, subtitle?, posterUrl, videoPath }
+//    variant  = 'full' (películas) | 'compact' (filas de capítulos)
+//    onStarted = callback al iniciar la descarga (p.ej. ir a "Descargas")
 // ----------------------------------------------------------------------------
-import { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, Alert, StyleSheet } from 'react-native';
-import { getDownload, startDownload, deleteDownload } from '../downloads';
+import { useEffect, useState } from 'react';
+import { View, Text, TouchableOpacity, Alert, StyleSheet } from 'react-native';
+import { getDownload, deleteDownload } from '../downloads';
 import { useDownloads } from '../downloadsContext';
 import { DownloadIcon, CheckIcon, TrashIcon, XIcon } from './Icons';
 
-export default function DownloadButton({ item, variant = 'full' }) {
-  const { refresh } = useDownloads();
-  const [state, setState] = useState('none'); // 'none' | 'downloading' | 'done'
-  const [progress, setProgress] = useState(0);
-  const cancelRef = useRef(null);
+const keyFor = (mediaId, episodeId) => (episodeId ? `${mediaId}_e${episodeId}` : `m${mediaId}`);
 
+export default function DownloadButton({ item, variant = 'full', onStarted }) {
+  const { active, startDownload, cancelDownload, refresh } = useDownloads();
+  const key = keyFor(item.mediaId, item.episodeId);
+  const dl = active[key];                 // en curso (o undefined)
+  const isActive = !!dl;
+  const [done, setDone] = useState(false);
+
+  // Estado "descargado" inicial y tras completar/cancelar (cuando sale de active).
+  // Depende de isActive (booleano), no del objeto dl, para no re-leer en cada tick.
   useEffect(() => {
     let alive = true;
-    getDownload(item.mediaId, item.episodeId).then((d) => { if (alive && d) setState('done'); });
+    getDownload(item.mediaId, item.episodeId).then((d) => { if (alive) setDone(!!d); });
     return () => { alive = false; };
-  }, [item.mediaId, item.episodeId]);
+  }, [item.mediaId, item.episodeId, isActive]);
 
-  const start = () => {
-    setState('downloading'); setProgress(0);
-    const { promise, cancel } = startDownload(item, (r) => setProgress(r));
-    cancelRef.current = cancel;
-    promise
-      .then((entry) => { setState(entry ? 'done' : 'none'); refresh(); })
-      .catch((e) => { Alert.alert('Descarga', e.message || 'No se pudo descargar'); setState('none'); });
-  };
-  const cancel = () => { cancelRef.current?.(); setState('none'); setProgress(0); };
+  const start = () => { startDownload(item); onStarted?.(); };
   const remove = () => {
     Alert.alert('Eliminar descarga', '¿Quitar esta descarga del dispositivo?', [
       { text: 'Cancelar', style: 'cancel' },
-      { text: 'Eliminar', style: 'destructive', onPress: async () => {
-        await deleteDownload(item.episodeId ? `${item.mediaId}_e${item.episodeId}` : `m${item.mediaId}`);
-        setState('none'); refresh();
-      } },
+      { text: 'Eliminar', style: 'destructive', onPress: async () => { await deleteDownload(key); setDone(false); refresh(); } },
     ]);
   };
 
-  const pct = Math.round(progress * 100);
+  const pct = Math.round((dl?.progress || 0) * 100);
 
   // -------- Variante compacta (capítulos) --------
   if (variant === 'compact') {
-    if (state === 'downloading') {
+    if (dl) {
       return (
-        <TouchableOpacity onPress={cancel} style={styles.compact} hitSlop={8}>
+        <TouchableOpacity onPress={() => cancelDownload(key)} style={styles.compact} hitSlop={8}>
           <Text style={styles.compactPct}>{pct}%</Text>
         </TouchableOpacity>
       );
     }
-    if (state === 'done') {
+    if (done) {
       return (
         <TouchableOpacity onPress={remove} style={styles.compact} hitSlop={8}>
           <CheckIcon size={18} color="#4ade80" />
@@ -69,16 +64,16 @@ export default function DownloadButton({ item, variant = 'full' }) {
   }
 
   // -------- Variante completa (película) --------
-  if (state === 'downloading') {
+  if (dl) {
     return (
       <View style={styles.progressRow}>
         <View style={styles.track}><View style={[styles.fill, { width: `${pct}%` }]} /></View>
         <Text style={styles.pct}>{pct}%</Text>
-        <TouchableOpacity onPress={cancel} hitSlop={10}><XIcon size={20} color="#bbb" /></TouchableOpacity>
+        <TouchableOpacity onPress={() => cancelDownload(key)} hitSlop={10}><XIcon size={20} color="#bbb" /></TouchableOpacity>
       </View>
     );
   }
-  if (state === 'done') {
+  if (done) {
     return (
       <View style={styles.doneRow}>
         <View style={styles.doneLeft}>
