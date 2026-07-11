@@ -7,6 +7,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { AuthProvider, useAuth } from './src/auth';
+import { DownloadsProvider } from './src/downloadsContext';
 import LoginScreen from './src/screens/LoginScreen';
 import CatalogScreen from './src/screens/CatalogScreen';
 import AdultCatalogScreen from './src/screens/AdultCatalogScreen';
@@ -53,10 +54,12 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AuthProvider>
-        <NavigationContainer theme={theme}>
-          <StatusBar style="light" />
-          <Routes />
-        </NavigationContainer>
+        <DownloadsProvider>
+          <NavigationContainer theme={theme}>
+            <StatusBar style="light" />
+            <Routes />
+          </NavigationContainer>
+        </DownloadsProvider>
       </AuthProvider>
     </SafeAreaProvider>
   );

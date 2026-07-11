@@ -3,12 +3,19 @@
 // ----------------------------------------------------------------------------
 import { View, Text, FlatList, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { imageSource } from '../api';
+import { useDownloads } from '../downloadsContext';
+import { DownloadCloudIcon } from './Icons';
 
 export function Poster({ item, onPress }) {
+  const { ids } = useDownloads();
+  const downloaded = ids.has(item.id);
   return (
     <TouchableOpacity style={styles.card} onPress={() => onPress(item)}>
       <Image source={imageSource(item.poster_url)} style={styles.poster} />
-      <Text numberOfLines={1} style={styles.cardTitle}>{item.title}</Text>
+      <View style={styles.titleRow}>
+        {downloaded && <DownloadCloudIcon size={14} color="#4ade80" />}
+        <Text numberOfLines={1} style={styles.cardTitle}>{item.title}</Text>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -32,5 +39,6 @@ const styles = StyleSheet.create({
   railTitle: { color: '#fff', fontSize: 18, fontWeight: '700', marginLeft: 12, marginBottom: 8 },
   card: { width: 120, marginRight: 10 },
   poster: { width: 120, height: 180, borderRadius: 8, backgroundColor: '#222' },
-  cardTitle: { color: '#ccc', fontSize: 12, marginTop: 4 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
+  cardTitle: { color: '#ccc', fontSize: 12, flexShrink: 1 },
 });

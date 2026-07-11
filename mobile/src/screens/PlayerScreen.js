@@ -16,6 +16,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as NavigationBar from 'expo-navigation-bar';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { fetchMedia, streamUrl, authHeaders, fetchProgress, saveProgress } from '../api';
+import { getLocalProgress, saveLocalProgress } from '../progress';
 import {
   PlayIcon, PauseIcon, ChevronLeftIcon, RotateCcwIcon, RotateCwIcon,
 } from '../components/PlayerIcons';
@@ -68,29 +69,31 @@ export default function PlayerScreen({ route, navigation }) {
 
   // --- Resolver la fuente y el punto de reanudación -------------------------
   useEffect(() => {
-    // Reproducción OFFLINE: el video ya está en el dispositivo.
-    if (localUri) {
-      (async () => {
-        const { stopped_at } = await fetchProgress(mediaId, episodeId); // 0 si no hay red
-        startAt.current = stopped_at || 0;
-        setSource({ uri: localUri });
-      })();
-      return;
-    }
-    // Reproducción por streaming.
+    let cancelled = false;
     (async () => {
-      const media = await fetchMedia(mediaId);
-      let videoPath;
-      if (episodeId) {
-        const all = (media.seasons || []).flatMap((s) => s.episodes);
-        videoPath = all.find((e) => e.id === episodeId)?.video_path;
+      // Fuente: local (offline) o streaming.
+      let src;
+      if (localUri) {
+        src = { uri: localUri };
       } else {
-        videoPath = media.video_path;
+        const media = await fetchMedia(mediaId);
+        const videoPath = episodeId
+          ? (media.seasons || []).flatMap((s) => s.episodes).find((e) => e.id === episodeId)?.video_path
+          : media.video_path;
+        src = { uri: streamUrl(videoPath), headers: authHeaders() };
       }
-      const { stopped_at } = await fetchProgress(mediaId, episodeId);
-      startAt.current = stopped_at || 0;
-      setSource({ uri: streamUrl(videoPath), headers: authHeaders() });
+
+      // Reanudar desde el MAYOR entre el progreso del servidor y el local
+      // (el local siempre está disponible, también sin conexión).
+      const [srv, loc] = await Promise.all([
+        fetchProgress(mediaId, episodeId), // {stopped_at:0} si no hay red
+        getLocalProgress(mediaId, episodeId),
+      ]);
+      if (cancelled) return;
+      startAt.current = Math.max(srv?.stopped_at || 0, loc || 0);
+      setSource(src);
     })().catch(console.warn);
+    return () => { cancelled = true; };
   }, [mediaId, episodeId, localUri]);
 
   // --- Crear el reproductor cuando hay fuente -------------------------------
@@ -141,11 +144,11 @@ export default function PlayerScreen({ route, navigation }) {
     if (!player) return;
     const interval = setInterval(() => {
       const t = player.currentTime || 0;
-      if (t > 0) { lastPos.current = t; saveProgress(mediaId, episodeId, t); }
+      if (t > 0) { lastPos.current = t; saveProgress(mediaId, episodeId, t); saveLocalProgress(mediaId, episodeId, t); }
     }, 10000);
     return () => {
       clearInterval(interval);
-      if (lastPos.current > 0) saveProgress(mediaId, episodeId, lastPos.current);
+      if (lastPos.current > 0) { saveProgress(mediaId, episodeId, lastPos.current); saveLocalProgress(mediaId, episodeId, lastPos.current); }
     };
   }, [player, mediaId, episodeId]);
 
@@ -165,7 +168,7 @@ export default function PlayerScreen({ route, navigation }) {
   const goBack = () => {
     const p = playerRef.current;
     const t = p?.currentTime || 0;
-    if (t > 0) saveProgress(mediaId, episodeId, t);
+    if (t > 0) { saveProgress(mediaId, episodeId, t); saveLocalProgress(mediaId, episodeId, t); }
     navigation.goBack();
   };
 

@@ -47,6 +47,12 @@ export async function getDownload(mediaId, episodeId) {
   return list.find((e) => e.key === keyFor(mediaId, episodeId)) || null;
 }
 
+// Conjunto de IDs de títulos con al menos una descarga (película o capítulo).
+export async function listDownloadedMediaIds() {
+  const list = await readManifest();
+  return new Set(list.map((e) => e.mediaId));
+}
+
 // Inicia una descarga. Devuelve { promise, cancel }.
 //   item = { mediaId, episodeId?, title, subtitle?, posterUrl, videoPath }
 //   onProgress(ratio 0..1)

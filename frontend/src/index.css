@@ -36,5 +36,4 @@ body {
    siguen visibles en pantalla completa y en cualquier monitor. */
 .vp-layer {
   transform: translateZ(0);
-  will-change: transform;
 }

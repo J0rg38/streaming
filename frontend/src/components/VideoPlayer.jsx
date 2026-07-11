@@ -293,7 +293,6 @@ export default function VideoPlayer({
         className="h-full w-full object-contain"
         onClick={togglePlay}
         onTimeUpdate={onTimeUpdate}
-        onProgress={onTimeUpdate}
         onLoadedMetadata={onLoadedMeta}
         onPlay={() => { setPlaying(true); ensureAudioBoost(); audioCtxRef.current?.resume?.(); }}
         onPause={() => setPlaying(false)}

@@ -7,9 +7,11 @@ import {
   View, Text, Image, FlatList, TouchableOpacity, Alert, StyleSheet,
 } from 'react-native';
 import { listDownloads, deleteDownload, formatBytes } from '../downloads';
+import { useDownloads } from '../downloadsContext';
 import { PlayFilledIcon, TrashIcon, DownloadCloudIcon } from '../components/Icons';
 
 export default function DownloadsScreen({ navigation }) {
+  const { refresh } = useDownloads();
   const [items, setItems] = useState([]);
 
   const load = useCallback(() => { listDownloads().then(setItems); }, []);
@@ -23,7 +25,7 @@ export default function DownloadsScreen({ navigation }) {
   const remove = (d) => {
     Alert.alert('Eliminar descarga', `¿Quitar "${d.title}"?`, [
       { text: 'Cancelar', style: 'cancel' },
-      { text: 'Eliminar', style: 'destructive', onPress: async () => { await deleteDownload(d.key); load(); } },
+      { text: 'Eliminar', style: 'destructive', onPress: async () => { await deleteDownload(d.key); load(); refresh(); } },
     ]);
   };
 

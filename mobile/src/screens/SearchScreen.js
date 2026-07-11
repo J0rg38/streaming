@@ -4,8 +4,11 @@
 import { useEffect, useState } from 'react';
 import { View, TextInput, FlatList, Image, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { searchMedia, imageSource } from '../api';
+import { useDownloads } from '../downloadsContext';
+import { DownloadCloudIcon } from '../components/Icons';
 
 export default function SearchScreen({ navigation }) {
+  const { ids } = useDownloads();
   const [q, setQ] = useState('');
   const [results, setResults] = useState([]);
 
@@ -30,7 +33,10 @@ export default function SearchScreen({ navigation }) {
         renderItem={({ item }) => (
           <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('Title', { id: item.id })}>
             <Image source={imageSource(item.poster_url)} style={styles.poster} />
-            <Text numberOfLines={1} style={styles.title}>{item.title}</Text>
+            <View style={styles.titleRow}>
+              {ids.has(item.id) && <DownloadCloudIcon size={13} color="#4ade80" />}
+              <Text numberOfLines={1} style={styles.title}>{item.title}</Text>
+            </View>
           </TouchableOpacity>
         )}
       />
@@ -42,5 +48,6 @@ const styles = StyleSheet.create({
   input: { backgroundColor: '#1f1f1f', color: '#fff', borderRadius: 24, paddingHorizontal: 16, paddingVertical: 12, borderWidth: 1, borderColor: '#333' },
   card: { flex: 1 / 3 },
   poster: { width: '100%', height: 160, borderRadius: 8, backgroundColor: '#222' },
-  title: { color: '#ccc', fontSize: 12, marginTop: 4 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
+  title: { color: '#ccc', fontSize: 12, flexShrink: 1 },
 });

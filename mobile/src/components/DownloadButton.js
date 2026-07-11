@@ -9,9 +9,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, Alert, StyleSheet } from 'react-native';
 import { getDownload, startDownload, deleteDownload } from '../downloads';
+import { useDownloads } from '../downloadsContext';
 import { DownloadIcon, CheckIcon, TrashIcon, XIcon } from './Icons';
 
 export default function DownloadButton({ item, variant = 'full' }) {
+  const { refresh } = useDownloads();
   const [state, setState] = useState('none'); // 'none' | 'downloading' | 'done'
   const [progress, setProgress] = useState(0);
   const cancelRef = useRef(null);
@@ -27,7 +29,7 @@ export default function DownloadButton({ item, variant = 'full' }) {
     const { promise, cancel } = startDownload(item, (r) => setProgress(r));
     cancelRef.current = cancel;
     promise
-      .then((entry) => setState(entry ? 'done' : 'none'))
+      .then((entry) => { setState(entry ? 'done' : 'none'); refresh(); })
       .catch((e) => { Alert.alert('Descarga', e.message || 'No se pudo descargar'); setState('none'); });
   };
   const cancel = () => { cancelRef.current?.(); setState('none'); setProgress(0); };
@@ -36,7 +38,7 @@ export default function DownloadButton({ item, variant = 'full' }) {
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Eliminar', style: 'destructive', onPress: async () => {
         await deleteDownload(item.episodeId ? `${item.mediaId}_e${item.episodeId}` : `m${item.mediaId}`);
-        setState('none');
+        setState('none'); refresh();
       } },
     ]);
   };
