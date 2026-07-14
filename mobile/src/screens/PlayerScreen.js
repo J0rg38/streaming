@@ -6,10 +6,10 @@
 //  parte de la pantalla. Streaming progresivo con Bearer token (fiable en móvil),
 //  reanuda desde el progreso y lo va guardando.
 // ----------------------------------------------------------------------------
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, Image, TouchableOpacity, Pressable, ActivityIndicator,
-  PanResponder, Platform, StyleSheet,
+  PanResponder, Platform, useTVEventHandler, StyleSheet,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -24,6 +24,9 @@ import {
 } from '../components/PlayerIcons';
 
 const IS_TV = Platform.isTV === true;
+// En TV los botones NO son enfocables: el control remoto se maneja globalmente
+// (D-pad = adelantar/atrasar, centro = play/pausa), como en Netflix/Prime.
+const TV_OFF = IS_TV ? { focusable: false, isTVSelectable: false } : undefined;
 
 const clamp01 = (x) => Math.max(0, Math.min(1, x || 0));
 
@@ -90,12 +93,10 @@ export default function PlayerScreen({ route, navigation }) {
   const clearHide = () => clearTimeout(hideTimer.current);
   const scheduleHide = () => {
     clearHide();
-    // En TV NO se auto-ocultan (con el control remoto haría imposible navegar).
-    if (IS_TV) return;
     // Sólo se ocultan si el video está reproduciéndose (en pausa se quedan).
     hideTimer.current = setTimeout(() => {
       if (playerRef.current?.playing) setShowControls(false);
-    }, 3800);
+    }, IS_TV ? 5000 : 3800);
   };
   const revealControls = () => { setShowControls(true); scheduleHide(); };
   const toggleControls = () => {
@@ -241,6 +242,39 @@ export default function PlayerScreen({ route, navigation }) {
     navigation.goBack();
   };
 
+  // --- Control remoto (Android TV): D-pad ±10s, centro play/pausa -----------
+  //  Las acciones se leen desde un ref para tener un handler estable (no
+  //  re-suscribir en cada render) sin closures obsoletas.
+  const actionsRef = useRef({});
+  actionsRef.current = { revealControls, skip, togglePlay };
+  const onTVEvent = useCallback((evt) => {
+    if (!IS_TV || !evt) return;
+    const t = evt.eventType;
+    const a = actionsRef.current;
+    switch (t) {
+      case 'left':
+      case 'rewind':
+        a.revealControls(); a.skip(-10); break;
+      case 'right':
+      case 'fastForward':
+        a.revealControls(); a.skip(10); break;
+      case 'up':
+      case 'down':
+        a.revealControls(); break;
+      case 'playPause':
+        a.revealControls(); a.togglePlay(); break;
+      // 'select' (OK) lo maneja el onPress del ancla enfocable, para no duplicar.
+      default: break;
+    }
+  }, []);
+  useTVEventHandler(onTVEvent);
+
+  // OK / centro del control remoto (o toque en móvil).
+  const onCenterPress = () => {
+    if (IS_TV) { revealControls(); togglePlay(); }
+    else toggleControls();
+  };
+
   // --- Barra de progreso arrastrable (PanResponder, sin dependencias) -------
   //  Usa coordenadas ABSOLUTAS de pantalla (gestureState) respecto al borde
   //  del track, no locationX (que es relativo al hijo bajo el dedo y hacía
@@ -318,8 +352,16 @@ export default function PlayerScreen({ route, navigation }) {
         contentFit={fit}
       />
 
-      {/* Captura de toques en TODA la pantalla: muestra/oculta los controles */}
-      <Pressable style={StyleSheet.absoluteFill} onPress={toggleControls} />
+      {/* Ancla a pantalla completa. En móvil: toca para mostrar/ocultar y OK.
+          En TV: ES el elemento enfocable que retiene el foco para que el D-pad
+          genere eventos (izq/der = ±10s vía TVEventHandler) y OK = play/pausa. */}
+      <Pressable
+        style={StyleSheet.absoluteFill}
+        onPress={onCenterPress}
+        focusable={IS_TV}
+        isTVSelectable={IS_TV}
+        hasTVPreferredFocus={IS_TV}
+      />
 
       {/* Spinner de carga (siempre visible durante el buffering) */}
       {buffering && (
@@ -335,32 +377,34 @@ export default function PlayerScreen({ route, navigation }) {
 
           {/* Barra superior: atrás (izq) + ajustar/expandir imagen (der) */}
           <View style={styles.topBar} pointerEvents="box-none">
-            <Focusable style={[styles.back, { top: insets.top + 8 }]} onPress={goBack} hitSlop={12} ring={false} focusStyle={styles.focusRound}>
+            <Focusable style={[styles.back, { top: insets.top + 8 }]} onPress={goBack} hitSlop={12} ring={false} focusStyle={styles.focusRound} {...TV_OFF}>
               <ChevronLeftIcon size={30} />
             </Focusable>
-            <Focusable
-              style={[styles.fitBtn, { top: insets.top + 8 }]}
-              onPress={() => { setFit((f) => (f === 'contain' ? 'cover' : 'contain')); revealControls(); }}
-              hitSlop={12}
-              ring={false}
-              focusStyle={styles.focusRound}
-            >
-              {fit === 'contain' ? <MaximizeIcon size={22} /> : <MinimizeIcon size={22} />}
-            </Focusable>
+            {!IS_TV && (
+              <Focusable
+                style={[styles.fitBtn, { top: insets.top + 8 }]}
+                onPress={() => { setFit((f) => (f === 'contain' ? 'cover' : 'contain')); revealControls(); }}
+                hitSlop={12}
+                ring={false}
+                focusStyle={styles.focusRound}
+              >
+                {fit === 'contain' ? <MaximizeIcon size={22} /> : <MinimizeIcon size={22} />}
+              </Focusable>
+            )}
           </View>
 
           {/* Controles centrales: atrasar · play/pausa · adelantar */}
           <View style={styles.centerRow} pointerEvents="box-none">
-            <Focusable style={styles.sideBtn} onPress={() => skip(-10)} hitSlop={10} ring={false} focusStyle={styles.focusSide} focusScale={1.12}>
+            <Focusable style={styles.sideBtn} onPress={() => skip(-10)} hitSlop={10} ring={false} focusStyle={styles.focusSide} focusScale={1.12} {...TV_OFF}>
               <RotateCcwIcon size={46} />
               <View style={styles.sideNumWrap} pointerEvents="none"><Text style={styles.sideNum}>10</Text></View>
             </Focusable>
 
-            <Focusable style={styles.playBtn} onPress={togglePlay} hitSlop={10} hasTVPreferredFocus ring={false} focusStyle={styles.focusPlay} focusScale={1.1}>
+            <Focusable style={styles.playBtn} onPress={togglePlay} hitSlop={10} ring={false} focusStyle={styles.focusPlay} focusScale={1.1} {...TV_OFF}>
               {playing ? <PauseIcon size={40} /> : <PlayIcon size={40} />}
             </Focusable>
 
-            <Focusable style={styles.sideBtn} onPress={() => skip(10)} hitSlop={10} ring={false} focusStyle={styles.focusSide} focusScale={1.12}>
+            <Focusable style={styles.sideBtn} onPress={() => skip(10)} hitSlop={10} ring={false} focusStyle={styles.focusSide} focusScale={1.12} {...TV_OFF}>
               <RotateCwIcon size={46} />
               <View style={styles.sideNumWrap} pointerEvents="none"><Text style={styles.sideNum}>10</Text></View>
             </Focusable>

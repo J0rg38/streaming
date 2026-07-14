@@ -38,15 +38,15 @@ export default function CatalogScreen({ navigation }) {
           <Logo height={26} />
           <Text style={styles.logo}>MI VOD</Text>
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-          <Focusable onPress={() => navigation.navigate('Search')} style={styles.headerBtn}><Text style={styles.link}>Buscar</Text></Focusable>
-          <Focusable onPress={() => navigation.navigate('Downloads')} style={styles.headerBtn}><DownloadIcon size={22} color="#ddd" /></Focusable>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <Focusable onPress={() => navigation.navigate('Search')} style={styles.headerBtn} ring={false} focusStyle={styles.headerBtnFocus} focusScale={1.05}><Text style={styles.link}>Buscar</Text></Focusable>
+          <Focusable onPress={() => navigation.navigate('Downloads')} style={styles.headerBtn} ring={false} focusStyle={styles.headerBtnFocus} focusScale={1.05}><DownloadIcon size={22} color="#ddd" /></Focusable>
           {user?.adult && (
-            <Focusable onPress={() => navigation.navigate('Adult')} style={styles.adultBtn}>
+            <Focusable onPress={() => navigation.navigate('Adult')} style={styles.adultBtn} ring={false} focusStyle={styles.adultBtnFocus} focusScale={1.05}>
               <Text style={styles.adultTxt}>+18</Text>
             </Focusable>
           )}
-          <Focusable onPress={signOut} style={styles.headerBtn}><Text style={styles.link}>Salir</Text></Focusable>
+          <Focusable onPress={signOut} style={styles.headerBtn} ring={false} focusStyle={styles.headerBtnFocus} focusScale={1.05}><Text style={styles.link}>Salir</Text></Focusable>
         </View>
       </View>
 
@@ -69,8 +69,10 @@ const styles = StyleSheet.create({
   center: { flex: 1, backgroundColor: '#141414', justifyContent: 'center', alignItems: 'center' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 14, backgroundColor: '#141414', zIndex: 10, elevation: 4 },
   logo: { color: '#E35336', fontSize: 22, fontWeight: '800' },
-  headerBtn: { paddingHorizontal: 6, paddingVertical: 4, borderRadius: 8 },
-  link: { color: '#ddd', fontSize: 15 },
-  adultBtn: { backgroundColor: 'rgba(227,83,54,0.2)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 3 },
-  adultTxt: { color: '#E35336', fontSize: 13, fontWeight: '700' },
+  headerBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5, borderColor: 'transparent' },
+  headerBtnFocus: { backgroundColor: 'rgba(255,255,255,0.16)', borderColor: '#fff' },
+  link: { color: '#eee', fontSize: 15 },
+  adultBtn: { backgroundColor: 'rgba(227,83,54,0.2)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1.5, borderColor: 'transparent' },
+  adultBtnFocus: { backgroundColor: 'rgba(227,83,54,0.45)', borderColor: '#E35336' },
+  adultTxt: { color: '#ff7a5c', fontSize: 13, fontWeight: '800' },
 });
