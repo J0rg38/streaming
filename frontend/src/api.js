@@ -45,7 +45,8 @@ export const fetchCatalog = () => apiFetch(`${BASE}/media`);
 export const fetchAdultCatalog = () => apiFetch(`${BASE}/media/adult`);
 export const fetchMedia   = (id) => apiFetch(`${BASE}/media/${id}`);
 export const fetchSimilar = (id) => apiFetch(`${BASE}/media/${id}/similar`);
-export const searchMedia  = (q) => apiFetch(`${BASE}/media/search?q=${encodeURIComponent(q)}`);
+export const searchMedia  = (q, adult = false) =>
+  apiFetch(`${BASE}/media/search?q=${encodeURIComponent(q)}${adult ? '&adult=true' : ''}`);
 
 // URL de streaming (la cookie viaja automáticamente al ser same-origin).
 export const streamUrl = (videoPath) =>

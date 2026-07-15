@@ -5,12 +5,12 @@
 //  se queda en blanco: muestra sugerencias (seguir viendo / recién añadidas).
 // ----------------------------------------------------------------------------
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { ArrowLeft, Search as SearchIcon, Loader2, X } from 'lucide-react';
-import { searchMedia, fetchCatalog } from '../api.js';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ArrowLeft, Search as SearchIcon, Loader2, X, Lock } from 'lucide-react';
+import { searchMedia, fetchCatalog, fetchAdultCatalog } from '../api.js';
 import MediaCard from '../components/MediaCard.jsx';
 
-export default function Search() {
+export default function Search({ adult = false }) {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const [q, setQ] = useState(params.get('q') || '');
@@ -18,18 +18,19 @@ export default function Search() {
   const [loading, setLoading] = useState(false);
   const [suggest, setSuggest] = useState(null);  // { continueWatching, recentlyAdded }
   const inputRef = useRef(null);
+  const backTo = adult ? '/adultos' : '/';
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
   // Sugerencias por defecto (cuando no hay texto). Se cargan una vez.
   useEffect(() => {
-    fetchCatalog()
+    (adult ? fetchAdultCatalog() : fetchCatalog())
       .then((c) => setSuggest({
         continueWatching: c.continueWatching || [],
         recentlyAdded: c.recentlyAdded || [],
       }))
       .catch(() => setSuggest({ continueWatching: [], recentlyAdded: [] }));
-  }, []);
+  }, [adult]);
 
   // Búsqueda con debounce (350ms). Si el campo se vacía, NO deja el spinner:
   // limpia el estado y muestra las sugerencias.
@@ -41,13 +42,13 @@ export default function Search() {
 
     setLoading(true);
     const t = setTimeout(() => {
-      searchMedia(term)
+      searchMedia(term, adult)
         .then(setData)
         .catch(() => setData({ results: [], hasTitleMatch: false }))
         .finally(() => setLoading(false));
     }, 350);
     return () => clearTimeout(t);
-  }, [q, setParams]);
+  }, [q, setParams, adult]);
 
   const results = data?.results || [];
   const showSimilarNote = data && results.length > 0 && !data.hasTitleMatch;
@@ -64,16 +65,21 @@ export default function Search() {
     <div className="min-h-screen">
       {/* -------- Barra superior con el buscador -------- */}
       <div className="sticky top-0 z-20 flex items-center gap-3 bg-surface/95 px-4 py-3 backdrop-blur sm:px-8">
-        <button onClick={() => navigate('/')} className="flex-shrink-0 text-gray-300 hover:text-white" title="Volver">
+        <button onClick={() => navigate(backTo)} className="flex-shrink-0 text-gray-300 hover:text-white" title="Volver">
           <ArrowLeft size={22} />
         </button>
+        {adult && (
+          <span className="flex flex-shrink-0 items-center gap-1 rounded-full bg-brand px-2.5 py-1 text-xs font-extrabold text-white">
+            <Lock size={12} /> +18
+          </span>
+        )}
         <div className="relative flex-1">
           <SearchIcon size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
           <input
             ref={inputRef}
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Buscar por título, género o actor…"
+            placeholder={adult ? 'Buscar en +18 por título, actriz, etiqueta…' : 'Buscar por título, género o actor…'}
             className="w-full rounded-full border border-gray-700 bg-black/40 py-2.5 pl-10 pr-10 text-white placeholder-gray-500 focus:border-brand focus:outline-none"
           />
           {q && (

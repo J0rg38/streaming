@@ -33,10 +33,40 @@ function buildProgress({ stopped_at, duration, episode }) {
 // Construye el catálogo (carruseles + progreso) para un usuario.
 //   adult=false -> sólo contenido normal (excluye adultos).
 //   adult=true  -> sólo contenido para adultos.
+// Construye rails "de descubrimiento" por un campo array (actors/tags): agrupa
+// por valor, prioriza los más frecuentes y asigna cada título a UN solo rail
+// (marcándolo en `seen`) para no repetir. Devuelve [{ title, items }].
+function buildLensRails(enriched, seen, field, prefix, maxRails) {
+  const counts = new Map();
+  for (const m of enriched) {
+    for (const v of m[field] || []) {
+      const val = (v || '').trim();
+      if (val) counts.set(val, (counts.get(val) || 0) + 1);
+    }
+  }
+  const candidates = [...counts.entries()]
+    .filter(([, c]) => c >= 2)
+    .sort((a, b) => b[1] - a[1])
+    .map(([v]) => v);
+
+  const rails = [];
+  for (const val of candidates) {
+    if (rails.length >= maxRails) break;
+    const items = enriched.filter(
+      (m) => !seen.has(m.id) && (m[field] || []).some((x) => (x || '').trim() === val)
+    );
+    if (items.length >= 2) {
+      items.forEach((m) => seen.add(m.id));
+      rails.push({ title: `${prefix}${val}`, items });
+    }
+  }
+  return rails;
+}
+
 async function buildCatalog(userId, adult) {
   const { rows: media } = await query(
     `SELECT id, title, description, type, release_year,
-            genres, poster_url, banner_url, video_path, duration, featured
+            genres, actors, tags, poster_url, banner_url, video_path, duration, featured
        FROM media
       WHERE is_adult = $1
       ORDER BY created_at DESC`,
@@ -74,20 +104,40 @@ async function buildCatalog(userId, adult) {
     return { ...item, progress };
   });
 
-  const continueWatching = enriched
-    .filter((m) => m.progress && (m.progress.percent === null || m.progress.percent < 95))
-    .slice(0, 20);
-  const recentlyAdded = enriched.slice(0, 15);
-  const featured = enriched.filter((m) => m.featured);
+  // Dedup ACUMULATIVO en el orden de visualización: cada título aparece en una
+  // sola sección. Prioridad: continuar viendo → recién añadidos → destacados →
+  // (adultos) recomendaciones por actriz/etiqueta → géneros.
+  const seen = new Set();
+  const take = (arr) => arr.filter((m) => !seen.has(m.id));
+  const mark = (arr) => { arr.forEach((m) => seen.add(m.id)); return arr; };
 
+  const continueWatching = mark(
+    enriched
+      .filter((m) => m.progress && (m.progress.percent === null || m.progress.percent < 95))
+      .slice(0, 20)
+  );
+  const recentlyAdded = mark(take(enriched).slice(0, 15));
+  const featured = mark(take(enriched).filter((m) => m.featured));
+
+  // Recomendaciones inteligentes (sólo adultos): por actriz y por etiquetas.
+  const discovery = adult
+    ? [
+        ...buildLensRails(enriched, seen, 'actors', '', 6),
+        ...buildLensRails(enriched, seen, 'tags', '#', 6),
+      ]
+    : [];
+
+  // Géneros: excluimos lo que ya salió en las secciones de arriba (continuar
+  // viendo, recientes, destacados, recomendaciones). Un título SÍ puede estar en
+  // varios géneros (navegación rica), pero nunca repite lo ya destacado arriba.
   const byGenre = {};
-  for (const item of enriched) {
+  for (const item of take(enriched)) {
     const genres = item.genres?.length ? item.genres : ['Otros'];
     for (const g of genres) (byGenre[g] ||= []).push(item);
   }
   const rails = Object.entries(byGenre).map(([genre, items]) => ({ genre, items }));
 
-  return { continueWatching, recentlyAdded, featured, rails, all: enriched };
+  return { continueWatching, recentlyAdded, featured, discovery, rails, all: enriched };
 }
 
 router.get('/', async (req, res) => {
@@ -126,6 +176,12 @@ router.get('/search', async (req, res) => {
   const q = (req.query.q || '').trim();
   if (!q) return res.json({ query: '', results: [], hasTitleMatch: false });
 
+  // Búsqueda en el catálogo normal o en el de adultos (requiere acceso).
+  const wantAdult = req.query.adult === 'true';
+  if (wantAdult && !canAccessAdult(req.user)) {
+    return res.status(403).json({ error: 'No tienes acceso a esta sección' });
+  }
+
   const like = `%${q}%`;
   try {
     const { rows } = await query(
@@ -140,7 +196,7 @@ router.get('/search', async (req, res) => {
                 similarity(lower(coalesce(description, '')), lower($1)) * 0.5
               ) AS score
          FROM media
-        WHERE is_adult = false      -- el contenido adulto sólo vive en su sección
+        WHERE is_adult = $3
           AND (title ILIKE $2
            OR EXISTS (SELECT 1 FROM unnest(genres) g WHERE g ILIKE $2)
            OR EXISTS (SELECT 1 FROM unnest(actors) a WHERE a ILIKE $2)
@@ -151,7 +207,7 @@ router.get('/search', async (req, res) => {
            OR similarity(lower(coalesce(array_to_string(tags,   ' '), '')), lower($1)) > 0.30)
         ORDER BY title_match DESC, score DESC, created_at DESC
         LIMIT 40`,
-      [q, like]
+      [q, like, wantAdult]
     );
 
     // ¿Hubo alguna coincidencia real en el título? (para avisar "similares").

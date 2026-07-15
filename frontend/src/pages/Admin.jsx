@@ -13,7 +13,7 @@ import {
   Film, Clapperboard, ListPlus, UploadCloud, ArrowLeft, CheckCircle2,
   Library, Search, Trash2, ChevronDown, ChevronRight, Loader2, LogOut,
   Users, ShieldCheck, User as UserIcon, UserPlus, Pencil, X, Star,
-  HardDrive, Lock,
+  HardDrive, Lock, List, LayoutGrid,
 } from 'lucide-react';
 import {
   uploadForm, fetchAdminSeries, fetchLibrary, fetchAdminMedia,
@@ -586,6 +586,7 @@ function LibraryManager({ adult = false }) {
   const [q, setQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
   const [type, setType] = useState('all'); // all | movie | series
+  const [view, setView] = useState('list'); // list | grid
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState(null);
   const [progress, setProgress] = useState({}); // { 'movie-8': 42, ... }
@@ -676,6 +677,17 @@ function LibraryManager({ adult = false }) {
             </button>
           ))}
         </div>
+        {/* Alternar vista lista / mosaico */}
+        <div className="flex items-center gap-1 rounded-lg bg-card p-1">
+          <button onClick={() => setView('list')} title="Vista en lista"
+            className={`rounded-md p-1.5 ${view === 'list' ? 'bg-brand text-white' : 'text-gray-400 hover:text-white'}`}>
+            <List size={18} />
+          </button>
+          <button onClick={() => setView('grid')} title="Vista en mosaico"
+            className={`rounded-md p-1.5 ${view === 'grid' ? 'bg-brand text-white' : 'text-gray-400 hover:text-white'}`}>
+            <LayoutGrid size={18} />
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -683,10 +695,60 @@ function LibraryManager({ adult = false }) {
       ) : data.items.length === 0 ? (
         <p className="text-sm text-gray-500">Sin resultados.</p>
       ) : (
-        <div className="space-y-2">
+        <div className={view === 'grid'
+          ? 'grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'
+          : 'space-y-2'}>
           {data.items.map((it) => {
             const isSeries = it.type === 'series';
             const open = expanded === it.id;
+
+            // -------- Vista en MOSAICO --------
+            if (view === 'grid') {
+              return (
+                <div key={it.id} className="overflow-hidden rounded-lg bg-card">
+                  <div className="relative aspect-[2/3] w-full bg-gray-800">
+                    <img src={it.poster_url} alt="" className="h-full w-full object-cover" />
+                    <div className="absolute left-1.5 top-1.5 flex flex-col items-start gap-1">
+                      <span className="rounded bg-black/70 px-1.5 py-0.5 text-[10px] uppercase text-gray-200">
+                        {isSeries ? 'Serie' : 'Película'}
+                      </span>
+                      {it.featured && (
+                        <span className="rounded bg-yellow-500/90 px-1.5 py-0.5 text-[10px] font-bold text-black">Estelar</span>
+                      )}
+                    </div>
+                    {!isSeries && (
+                      <div className="absolute bottom-1.5 left-1.5">
+                        <StatusBadge status={it.transcode_status} percent={progress[`movie-${it.id}`]} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-2.5">
+                    <p className="truncate text-sm font-semibold">{it.title}</p>
+                    <p className="truncate text-xs text-gray-400">
+                      {isSeries
+                        ? `${it.season_count} temp · ${it.episode_count} cap`
+                        : `${it.release_year || 's/año'}${it.duration ? ` · ${formatMinutes(it.duration)}` : ''}`}
+                    </p>
+                    <div className="mt-2 flex items-center gap-1.5">
+                      <button onClick={() => setEditId(it.id)} title="Editar"
+                        className="flex-1 rounded bg-white/10 p-1.5 text-gray-200 hover:bg-white/20">
+                        <Pencil size={14} className="mx-auto" />
+                      </button>
+                      <button onClick={() => toggleFeatured(it)} title={it.featured ? 'Quitar de Estelares' : 'Marcar como Estelar'}
+                        className={`flex-1 rounded p-1.5 ${it.featured ? 'bg-yellow-500/20 text-yellow-300' : 'bg-white/10 text-gray-300 hover:bg-white/20'}`}>
+                        <Star size={14} fill={it.featured ? 'currentColor' : 'none'} className="mx-auto" />
+                      </button>
+                      <button onClick={() => removeMedia(it)} title="Eliminar"
+                        className="flex-1 rounded bg-red-600/20 p-1.5 text-red-300 hover:bg-red-600/40">
+                        <Trash2 size={14} className="mx-auto" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            // -------- Vista en LISTA --------
             return (
               <div key={it.id} className="overflow-hidden rounded-lg bg-card">
                 <div className="flex flex-wrap items-center gap-3 p-3">
@@ -1163,8 +1225,8 @@ export default function Admin() {
       </div>
 
       <div className="flex">
-        {/* -------- Sidebar (escritorio) -------- */}
-        <aside className="hidden w-60 flex-shrink-0 border-r border-gray-800 p-4 md:block">
+        {/* -------- Sidebar (escritorio) — fija al hacer scroll -------- */}
+        <aside className="sticky top-0 hidden max-h-screen w-60 flex-shrink-0 self-start overflow-y-auto border-r border-gray-800 p-4 md:block">
           <nav className="space-y-6">
             {groups.map((g) => (
               <div key={g.title}>
