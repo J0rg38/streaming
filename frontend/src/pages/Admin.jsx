@@ -7,19 +7,19 @@
 //    3. Serie      -> crear ficha de serie.
 //    4. Capítulo   -> añadir episodios a una serie.
 // ----------------------------------------------------------------------------
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Film, Clapperboard, ListPlus, UploadCloud, ArrowLeft, CheckCircle2,
   Library, Search, Trash2, ChevronDown, ChevronRight, Loader2, LogOut,
   Users, ShieldCheck, User as UserIcon, UserPlus, Pencil, X, Star,
-  HardDrive, Lock, List, LayoutGrid,
+  HardDrive, Lock, List, LayoutGrid, Download, Database, Upload, CheckSquare, Square,
 } from 'lucide-react';
 import {
   uploadForm, fetchAdminSeries, fetchLibrary, fetchAdminMedia,
   deleteMedia, deleteEpisode, fetchUsers, deleteUser, updateUserRole,
   createUser, updateUser, fetchTranscodeProgress, setFeatured, updateMediaDetails,
-  fetchDisks,
+  fetchDisks, mediaDownloadUrl, backupUrl, restoreBackup,
 } from '../api.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { formatMinutes, formatBytes } from '../utils/format.js';
@@ -589,6 +589,7 @@ function LibraryManager({ adult = false }) {
   const [view, setView] = useState('list'); // list | grid
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState(null);
+  const [selected, setSelected] = useState(new Set()); // ids de películas seleccionadas
   const [progress, setProgress] = useState({}); // { 'movie-8': 42, ... }
   const [reloadSignal, setReloadSignal] = useState(0);
   const [editId, setEditId] = useState(null);   // id del título en edición
@@ -648,6 +649,35 @@ function LibraryManager({ adult = false }) {
     catch { load(); }
   };
 
+  // --- Selección y descarga (solo películas) ------------------------------
+  const movieItems = data.items.filter((it) => it.type === 'movie');
+  const allMoviesSelected = movieItems.length > 0 && movieItems.every((it) => selected.has(it.id));
+  const toggleSelect = (id) =>
+    setSelected((prev) => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  const toggleSelectAll = () =>
+    setSelected((prev) => {
+      const n = new Set(prev);
+      if (allMoviesSelected) movieItems.forEach((it) => n.delete(it.id));
+      else movieItems.forEach((it) => n.add(it.id));
+      return n;
+    });
+  const triggerDownload = (id) => {
+    const a = document.createElement('a');
+    a.href = mediaDownloadUrl(id);
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+  // Descarga masiva: separa cada descarga para que el navegador no las bloquee.
+  const downloadSelected = () => {
+    [...selected].forEach((id, i) => setTimeout(() => triggerDownload(id), i * 900));
+  };
+
   const totalPages = Math.max(1, Math.ceil(data.total / PAGE_SIZE));
   const chips = [
     { key: 'all', label: `Todo (${data.movieCount + data.seriesCount})` },
@@ -690,6 +720,30 @@ function LibraryManager({ adult = false }) {
         </div>
       </div>
 
+      {/* Barra de selección / descarga masiva (solo películas) */}
+      {movieItems.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-gray-800 bg-black/20 px-3 py-2">
+          <button onClick={toggleSelectAll} className="flex items-center gap-2 text-sm text-gray-300 hover:text-white">
+            {allMoviesSelected ? <CheckSquare size={18} className="text-brand" /> : <Square size={18} />}
+            Seleccionar películas
+          </button>
+          <span className="text-sm text-gray-500">{selected.size} seleccionada{selected.size === 1 ? '' : 's'}</span>
+          <div className="flex-1" />
+          {selected.size > 0 && (
+            <>
+              <button onClick={() => setSelected(new Set())}
+                className="rounded bg-white/10 px-3 py-1.5 text-sm text-gray-300 hover:bg-white/20">
+                Limpiar
+              </button>
+              <button onClick={downloadSelected}
+                className="flex items-center gap-2 rounded bg-brand px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-dark">
+                <Download size={16} /> Descargar {selected.size} video{selected.size === 1 ? '' : 's'}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {loading ? (
         <p className="text-gray-400">Cargando biblioteca…</p>
       ) : data.items.length === 0 ? (
@@ -704,8 +758,10 @@ function LibraryManager({ adult = false }) {
 
             // -------- Vista en MOSAICO --------
             if (view === 'grid') {
+              const isMovie = it.type === 'movie';
+              const isSel = selected.has(it.id);
               return (
-                <div key={it.id} className="overflow-hidden rounded-lg bg-card">
+                <div key={it.id} className={`overflow-hidden rounded-lg bg-card ring-2 ${isSel ? 'ring-brand' : 'ring-transparent'}`}>
                   <div className="relative aspect-[2/3] w-full bg-gray-800">
                     <img src={it.poster_url} alt="" className="h-full w-full object-cover" />
                     <div className="absolute left-1.5 top-1.5 flex flex-col items-start gap-1">
@@ -716,10 +772,12 @@ function LibraryManager({ adult = false }) {
                         <span className="rounded bg-yellow-500/90 px-1.5 py-0.5 text-[10px] font-bold text-black">Estelar</span>
                       )}
                     </div>
-                    {!isSeries && (
-                      <div className="absolute bottom-1.5 left-1.5">
-                        <StatusBadge status={it.transcode_status} percent={progress[`movie-${it.id}`]} />
-                      </div>
+                    {/* Checkbox de selección (solo películas) */}
+                    {isMovie && (
+                      <button onClick={() => toggleSelect(it.id)} title="Seleccionar"
+                        className="absolute right-1.5 top-1.5 rounded bg-black/60 p-0.5 text-white hover:bg-black/80">
+                        {isSel ? <CheckSquare size={20} className="text-brand" /> : <Square size={20} />}
+                      </button>
                     )}
                   </div>
                   <div className="p-2.5">
@@ -729,11 +787,23 @@ function LibraryManager({ adult = false }) {
                         ? `${it.season_count} temp · ${it.episode_count} cap`
                         : `${it.release_year || 's/año'}${it.duration ? ` · ${formatMinutes(it.duration)}` : ''}`}
                     </p>
+                    {/* Estado de transcodificación FUERA de la imagen */}
+                    {isMovie && (
+                      <div className="mt-1.5">
+                        <StatusBadge status={it.transcode_status} percent={progress[`movie-${it.id}`]} />
+                      </div>
+                    )}
                     <div className="mt-2 flex items-center gap-1.5">
                       <button onClick={() => setEditId(it.id)} title="Editar"
                         className="flex-1 rounded bg-white/10 p-1.5 text-gray-200 hover:bg-white/20">
                         <Pencil size={14} className="mx-auto" />
                       </button>
+                      {isMovie && (
+                        <button onClick={() => triggerDownload(it.id)} title="Descargar video original"
+                          className="flex-1 rounded bg-white/10 p-1.5 text-gray-200 hover:bg-white/20">
+                          <Download size={14} className="mx-auto" />
+                        </button>
+                      )}
                       <button onClick={() => toggleFeatured(it)} title={it.featured ? 'Quitar de Estelares' : 'Marcar como Estelar'}
                         className={`flex-1 rounded p-1.5 ${it.featured ? 'bg-yellow-500/20 text-yellow-300' : 'bg-white/10 text-gray-300 hover:bg-white/20'}`}>
                         <Star size={14} fill={it.featured ? 'currentColor' : 'none'} className="mx-auto" />
@@ -757,7 +827,9 @@ function LibraryManager({ adult = false }) {
                       {open ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
                     </button>
                   ) : (
-                    <span className="w-5 flex-shrink-0" />
+                    <button onClick={() => toggleSelect(it.id)} title="Seleccionar" className="flex-shrink-0 text-gray-400 hover:text-white">
+                      {selected.has(it.id) ? <CheckSquare size={20} className="text-brand" /> : <Square size={20} />}
+                    </button>
                   )}
                   <img src={it.poster_url} alt="" className="h-16 w-11 flex-shrink-0 rounded object-cover" />
                   <div className="min-w-0 flex-1">
@@ -785,6 +857,12 @@ function LibraryManager({ adult = false }) {
                       className="flex flex-1 items-center justify-center gap-1 rounded bg-white/10 px-3 py-1.5 text-sm text-gray-200 hover:bg-white/20 sm:flex-none">
                       <Pencil size={15} /> Editar
                     </button>
+                    {!isSeries && (
+                      <button onClick={() => triggerDownload(it.id)} title="Descargar video original"
+                        className="flex flex-1 items-center justify-center gap-1 rounded bg-white/10 px-3 py-1.5 text-sm text-gray-200 hover:bg-white/20 sm:flex-none">
+                        <Download size={15} /> Descargar
+                      </button>
+                    )}
                     <button onClick={() => toggleFeatured(it)}
                       title={it.featured ? 'Quitar de Estelares' : 'Marcar como Estelar'}
                       className={`flex flex-1 items-center justify-center gap-1 rounded px-3 py-1.5 text-sm sm:flex-none ${
@@ -1125,6 +1203,95 @@ function StorageManager() {
 }
 
 // ===========================================================================
+//  Pestaña BACKUP: copia de seguridad y restauración de la base de datos.
+// ===========================================================================
+function BackupManager() {
+  const [restoring, setRestoring] = useState(false);
+  const [msg, setMsg] = useState(null); // { ok, text }
+  const fileRef = useRef(null);
+
+  const doBackup = () => {
+    const a = document.createElement('a');
+    a.href = backupUrl();
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  const onPickRestore = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // permite re-seleccionar el mismo archivo
+    if (!file) return;
+    if (!confirm(
+      `¿Restaurar desde «${file.name}»?\n\nESTO REEMPLAZARÁ los datos actuales ` +
+      `(catálogo, usuarios y progreso) por los del backup. No se puede deshacer.`
+    )) return;
+
+    setRestoring(true); setMsg(null);
+    try {
+      const fd = new FormData();
+      fd.append('backup', file);
+      await restoreBackup(fd);
+      setMsg({ ok: true, text: 'Restauración completada. Recarga la aplicación para ver los cambios.' });
+    } catch (err) {
+      setMsg({ ok: false, text: err.message || 'No se pudo restaurar' });
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  return (
+    <div className="max-w-2xl space-y-6">
+      {/* Crear backup */}
+      <div className="rounded-lg border border-gray-800 bg-card p-5">
+        <div className="mb-2 flex items-center gap-2">
+          <Database size={20} className="text-brand" />
+          <h3 className="font-semibold">Copia de seguridad</h3>
+        </div>
+        <p className="mb-4 text-sm text-gray-400">
+          Descarga un respaldo completo en un solo archivo <code>.tar.gz</code>: la base de
+          datos (catálogo, series/capítulos, usuarios y progreso) <strong>más los pósters y
+          banners</strong>. Guárdalo en un lugar seguro.
+        </p>
+        <button onClick={doBackup}
+          className="flex items-center gap-2 rounded-lg bg-brand px-4 py-2.5 font-semibold text-white hover:bg-brand-dark">
+          <Download size={18} /> Descargar backup
+        </button>
+      </div>
+
+      {/* Restaurar backup */}
+      <div className="rounded-lg border border-gray-800 bg-card p-5">
+        <div className="mb-2 flex items-center gap-2">
+          <Upload size={20} className="text-brand" />
+          <h3 className="font-semibold">Restaurar</h3>
+        </div>
+        <p className="mb-4 text-sm text-gray-400">
+          Restaura desde un archivo de backup (<code>.tar.gz</code> o <code>.sql</code>):
+          recupera la base de datos y los pósters/banners.
+          <span className="text-red-300"> Reemplaza los datos actuales.</span>
+        </p>
+        <input ref={fileRef} type="file" accept=".tar.gz,.tgz,.gz,.sql" onChange={onPickRestore} className="hidden" />
+        <button onClick={() => fileRef.current?.click()} disabled={restoring}
+          className="flex items-center gap-2 rounded-lg border border-gray-700 bg-white/5 px-4 py-2.5 font-semibold text-gray-200 hover:bg-white/10 disabled:opacity-50">
+          {restoring ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
+          {restoring ? 'Restaurando…' : 'Seleccionar archivo y restaurar'}
+        </button>
+        {msg && (
+          <p className={`mt-3 text-sm ${msg.ok ? 'text-green-400' : 'text-red-400'}`}>{msg.text}</p>
+        )}
+      </div>
+
+      <p className="text-xs text-gray-600">
+        Nota: el backup incluye la base de datos y las imágenes (pósters/banners). Los
+        <strong> archivos de video no se incluyen</strong> por su tamaño; respáldalos por
+        separado copiando las carpetas <code>movies</code>/<code>series</code> de tus discos.
+      </p>
+    </div>
+  );
+}
+
+// ===========================================================================
 //  Página principal del panel.
 // ===========================================================================
 export default function Admin() {
@@ -1164,6 +1331,7 @@ export default function Admin() {
       items: [
         { key: 'users',   label: 'Usuarios',       icon: Users },
         { key: 'storage', label: 'Almacenamiento', icon: HardDrive },
+        { key: 'backup',  label: 'Backup',         icon: Database },
       ],
     },
   ];
@@ -1196,13 +1364,14 @@ export default function Admin() {
       {tab === 'episode'   && <EpisodeForm series={series} refreshSeries={refreshSeries} />}
       {tab === 'users'     && <UserManager />}
       {tab === 'storage'   && <StorageManager />}
+      {tab === 'backup'    && <BackupManager />}
     </>
   );
 
   return (
-    <div className="min-h-screen bg-surface">
-      {/* -------- Barra superior (ancho completo) -------- */}
-      <header className="flex items-center justify-between border-b border-gray-800 bg-black/40 px-4 py-3 sm:px-6">
+    <div className="flex h-screen flex-col bg-surface">
+      {/* -------- Barra superior FIJA (ancho completo) -------- */}
+      <header className="flex flex-shrink-0 items-center justify-between border-b border-gray-800 bg-black/40 px-4 py-3 sm:px-6">
         <div className="flex items-center gap-2">
           <img src="/logo.svg" alt="Mi VOD" className="h-7 w-auto" />
           <span className="text-xl font-extrabold text-brand">MI VOD</span>
@@ -1220,13 +1389,13 @@ export default function Admin() {
       </header>
 
       {/* -------- Navegación móvil (horizontal) -------- */}
-      <div className="no-scrollbar flex gap-2 overflow-x-auto border-b border-gray-800 px-4 py-3 md:hidden">
+      <div className="no-scrollbar flex flex-shrink-0 gap-2 overflow-x-auto border-b border-gray-800 px-4 py-3 md:hidden">
         {allTabs.map((item) => <NavButton key={item.key} item={item} mobile />)}
       </div>
 
-      <div className="flex">
-        {/* -------- Sidebar (escritorio) — fija al hacer scroll -------- */}
-        <aside className="sticky top-0 hidden max-h-screen w-60 flex-shrink-0 self-start overflow-y-auto border-r border-gray-800 p-4 md:block">
+      <div className="flex min-h-0 flex-1">
+        {/* -------- Sidebar (escritorio) — fija, separador de altura completa -------- */}
+        <aside className="hidden w-60 flex-shrink-0 overflow-y-auto border-r border-gray-800 p-4 md:block">
           <nav className="space-y-6">
             {groups.map((g) => (
               <div key={g.title}>
@@ -1239,8 +1408,8 @@ export default function Admin() {
           </nav>
         </aside>
 
-        {/* -------- Contenido (ocupa el resto del ancho) -------- */}
-        <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">
+        {/* -------- Contenido (scroll propio) -------- */}
+        <main className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
           <div className="mb-5 flex items-center gap-2">
             {CurrentIcon && <CurrentIcon size={22} className="text-brand" />}
             <h1 className="text-xl font-bold sm:text-2xl">{current?.label}</h1>

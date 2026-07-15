@@ -113,6 +113,14 @@ export const updateMediaDetails = (id, formData) =>
   apiFetch(`${BASE}/admin/media/${id}`, { method: 'PATCH', body: formData });
 export const deleteEpisode     = (id) => apiFetch(`${BASE}/admin/episodes/${id}`, { method: 'DELETE' });
 
+// Descarga del video original de una película (URL para <a href> / descarga).
+export const mediaDownloadUrl  = (id) => `${BASE}/admin/media/${id}/download`;
+
+// Copia de seguridad / restauración de la base de datos.
+export const backupUrl         = () => `${BASE}/admin/backup`;
+export const restoreBackup     = (formData) =>
+  apiFetch(`${BASE}/admin/restore`, { method: 'POST', body: formData });
+
 // Gestión de usuarios
 export const fetchUsers        = () => apiFetch(`${BASE}/admin/users`);
 export const deleteUser        = (id) => apiFetch(`${BASE}/admin/users/${id}`, { method: 'DELETE' });

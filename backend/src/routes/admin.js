@@ -15,11 +15,22 @@ import { Router } from 'express';
 import multer from 'multer';
 import bcrypt from 'bcryptjs';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
+import { spawn } from 'child_process';
 import { query } from '../db.js';
 import { enqueueTranscode, removeHls, getTranscodeProgress } from '../transcoder.js';
-import { getDisk, listDisksUsage, DISKS, diskForPath } from '../storage.js';
+import { getDisk, listDisksUsage, DISKS, DEFAULT_DISK, diskForPath, isInsideAnyDisk } from '../storage.js';
 import { canAccessAdult } from '../middleware/auth.js';
+
+// Config de conexión para pg_dump/psql (mismos valores que db.js).
+const PG = {
+  host: process.env.PGHOST || 'localhost',
+  port: String(process.env.PGPORT || 5432),
+  user: process.env.PGUSER || 'postgres',
+  database: process.env.PGDATABASE || 'vod',
+  password: process.env.PGPASSWORD || 'postgres',
+};
 
 const router = Router();
 
@@ -706,6 +717,163 @@ router.delete('/episodes/:id', async (req, res) => {
   } catch (err) {
     console.error('[DELETE episode]', err);
     res.status(500).json({ error: 'Error al eliminar el capítulo' });
+  }
+});
+
+// ===========================================================================
+//  GET /api/admin/media/:id/download — descarga el VIDEO ORIGINAL (película).
+//  Envía el archivo tal cual (con soporte de rangos) como adjunto.
+// ===========================================================================
+router.get('/media/:id/download', async (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    const { rows } = await query(
+      `SELECT title, type, video_path FROM media WHERE id = $1`, [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'No encontrado' });
+    const m = rows[0];
+    if (m.type !== 'movie' || !m.video_path) {
+      return res.status(400).json({ error: 'Solo se puede descargar el video de una película' });
+    }
+    const absolute = path.resolve(m.video_path);
+    if (!isInsideAnyDisk(absolute) || !fs.existsSync(absolute)) {
+      return res.status(404).json({ error: 'Archivo no encontrado' });
+    }
+    const ext = path.extname(absolute) || '.mp4';
+    const filename = `${safeName(m.title)}${ext}`;
+    res.download(absolute, filename); // Content-Disposition: attachment + rangos
+  } catch (err) {
+    console.error('[GET media/:id/download]', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Error al descargar' });
+  }
+});
+
+// Ejecuta un comando y resuelve/rechaza según el código de salida.
+function run(cmd, args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const p = spawn(cmd, args, opts);
+    let err = '';
+    p.stderr?.on('data', (d) => { err += d.toString(); });
+    p.on('error', (e) => reject(new Error(`${cmd}: ${e.message}`)));
+    p.on('close', (code) => (opts.ignoreCode || code === 0
+      ? resolve({ code, err })
+      : reject(new Error(`${cmd} salió con código ${code}: ${err.slice(-400)}`))));
+  });
+}
+
+// ===========================================================================
+//  GET /api/admin/backup — copia de seguridad COMPLETA (.tar.gz):
+//    · database.sql  -> volcado de toda la base de datos (pg_dump)
+//    · images/       -> pósters y banners de todos los discos
+//  Los videos NO se incluyen (demasiado grandes; se respaldan aparte).
+// ===========================================================================
+router.get('/backup', async (req, res) => {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const workdir = path.join(os.tmpdir(), `mivod-backup-${stamp}-${process.pid}`);
+  const cleanup = () => fs.rm(workdir, { recursive: true, force: true }, () => {});
+  try {
+    fs.mkdirSync(path.join(workdir, 'images'), { recursive: true });
+
+    // 1) Volcado de la base de datos.
+    const sqlPath = path.join(workdir, 'database.sql');
+    await new Promise((resolve, reject) => {
+      const out = fs.createWriteStream(sqlPath);
+      const dump = spawn('pg_dump', [
+        '-h', PG.host, '-p', PG.port, '-U', PG.user, '-d', PG.database,
+        '--no-owner', '--no-privileges', '--clean', '--if-exists',
+      ], { env: { ...process.env, PGPASSWORD: PG.password } });
+      let err = '';
+      dump.stderr.on('data', (d) => { err += d.toString(); });
+      dump.on('error', reject);
+      dump.stdout.pipe(out);
+      out.on('finish', resolve);
+      dump.on('close', (code) => { if (code !== 0) reject(new Error('pg_dump: ' + err)); });
+    });
+
+    // 2) Copiar imágenes (pósters/banners) de TODOS los discos.
+    const imagesOut = path.join(workdir, 'images');
+    for (const d of DISKS) {
+      const dir = path.join(d.path, 'images');
+      if (!fs.existsSync(dir)) continue;
+      for (const f of fs.readdirSync(dir)) {
+        try {
+          const src = path.join(dir, f);
+          if (fs.statSync(src).isFile()) fs.copyFileSync(src, path.join(imagesOut, f));
+        } catch { /* omite el que falle */ }
+      }
+    }
+
+    // 3) Empaquetar y transmitir el .tar.gz.
+    res.setHeader('Content-Type', 'application/gzip');
+    res.setHeader('Content-Disposition', `attachment; filename="mivod-backup-${stamp}.tar.gz"`);
+    const tar = spawn('tar', ['czf', '-', '-C', workdir, 'database.sql', 'images']);
+    tar.stdout.pipe(res);
+    tar.on('error', (e) => {
+      console.error('[backup] tar error:', e.message);
+      if (!res.headersSent) res.status(500).json({ error: 'tar no está disponible en el servidor' });
+      cleanup();
+    });
+    tar.on('close', cleanup);
+    res.on('close', cleanup);
+  } catch (e) {
+    console.error('[backup]', e.message);
+    cleanup();
+    if (!res.headersSent) res.status(500).json({ error: e.message || 'Error al generar el backup' });
+  }
+});
+
+// ===========================================================================
+//  POST /api/admin/restore — restaura desde un backup (.tar.gz o .sql).
+//  ¡DESTRUCTIVO! Reemplaza los datos actuales y recupera pósters/banners.
+// ===========================================================================
+const restoreTmp = path.join(os.tmpdir(), 'mivod-restore-uploads');
+fs.mkdirSync(restoreTmp, { recursive: true });
+const backupUpload = multer({ dest: restoreTmp, limits: { fileSize: 4 * 1024 * 1024 * 1024 } });
+
+router.post('/restore', backupUpload.single('backup'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Falta el archivo de backup' });
+
+  const name = (req.file.originalname || '').toLowerCase();
+  const workdir = path.join(os.tmpdir(), `mivod-restore-${Date.now()}-${process.pid}`);
+  const cleanup = () => {
+    fs.rm(workdir, { recursive: true, force: true }, () => {});
+    fs.rm(req.file.path, { force: true }, () => {});
+  };
+  try {
+    fs.mkdirSync(workdir, { recursive: true });
+
+    // Localizar el database.sql (directo si es .sql; extraído si es .tar.gz).
+    let sqlPath;
+    if (name.endsWith('.sql')) {
+      sqlPath = req.file.path;
+    } else {
+      await run('tar', ['xzf', req.file.path, '-C', workdir]);
+      sqlPath = path.join(workdir, 'database.sql');
+      if (!fs.existsSync(sqlPath)) throw new Error('El backup no contiene database.sql');
+    }
+
+    // 1) Restaurar la base de datos (ignoramos código: --clean puede avisar).
+    await run('psql', [
+      '-h', PG.host, '-p', PG.port, '-U', PG.user, '-d', PG.database,
+      '-v', 'ON_ERROR_STOP=0', '-f', sqlPath,
+    ], { env: { ...process.env, PGPASSWORD: PG.password }, ignoreCode: true });
+
+    // 2) Recuperar imágenes al disco principal (los estáticos sirven de cualquiera).
+    const imgDir = path.join(workdir, 'images');
+    if (fs.existsSync(imgDir)) {
+      const dest = path.join(DEFAULT_DISK.path, 'images');
+      fs.mkdirSync(dest, { recursive: true });
+      for (const f of fs.readdirSync(imgDir)) {
+        try { fs.copyFileSync(path.join(imgDir, f), path.join(dest, f)); } catch { /* omite */ }
+      }
+    }
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[restore]', e.message);
+    if (!res.headersSent) res.status(500).json({ error: e.message || 'No se pudo restaurar' });
+  } finally {
+    cleanup();
   }
 });
 
