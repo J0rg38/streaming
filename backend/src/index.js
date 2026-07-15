@@ -21,6 +21,18 @@ import { DISKS, ensureDiskDirs } from './storage.js';
 const app = express();
 const PORT = Number(process.env.PORT) || 4000;
 
+// Detrás de Nginx (proxy inverso en localhost). Necesario para que Express lea
+// bien la IP real (X-Forwarded-For) y detecte HTTPS (X-Forwarded-Proto) al poner
+// cookies "secure". Sin esto, express-rate-limit lanza errores async que TUMBAN
+// el proceso (causa del 502 al subir) y las cookies "secure" no se envían (401).
+app.set('trust proxy', 1);
+
+// Red de seguridad: una promesa rechazada sin manejar NO debe tumbar el servidor
+// en producción (registrar y seguir sirviendo, p.ej. durante una subida grande).
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
+});
+
 ensureDiskDirs(); // crea las subcarpetas en todos los discos configurados
 
 // Cabeceras para archivos HLS (playlists y segmentos).
