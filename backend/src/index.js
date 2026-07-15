@@ -27,10 +27,14 @@ const PORT = Number(process.env.PORT) || 4000;
 // el proceso (causa del 502 al subir) y las cookies "secure" no se envían (401).
 app.set('trust proxy', 1);
 
-// Red de seguridad: una promesa rechazada sin manejar NO debe tumbar el servidor
-// en producción (registrar y seguir sirviendo, p.ej. durante una subida grande).
+// Red de seguridad: ni una promesa rechazada ni un error de stream no manejado
+// (p.ej. al escribir un video en disco) deben tumbar el servidor durante una
+// subida grande. Registramos y seguimos sirviendo.
 process.on('unhandledRejection', (reason) => {
   console.error('[unhandledRejection]', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err);
 });
 
 ensureDiskDirs(); // crea las subcarpetas en todos los discos configurados
