@@ -590,6 +590,8 @@ function LibraryManager({ adult = false }) {
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState(null);
   const [selected, setSelected] = useState(new Set()); // ids de películas seleccionadas
+  const navigate = useNavigate();
+  const openDetail = (it) => navigate(it.type === 'series' ? `/series/${it.id}` : `/movie/${it.id}`);
   const [progress, setProgress] = useState({}); // { 'movie-8': 42, ... }
   const [reloadSignal, setReloadSignal] = useState(0);
   const [editId, setEditId] = useState(null);   // id del título en edición
@@ -763,8 +765,9 @@ function LibraryManager({ adult = false }) {
               return (
                 <div key={it.id} className={`overflow-hidden rounded-lg bg-card ring-2 ${isSel ? 'ring-brand' : 'ring-transparent'}`}>
                   <div className="relative aspect-[2/3] w-full bg-gray-800">
-                    <img src={it.poster_url} alt="" className="h-full w-full object-cover" />
-                    <div className="absolute left-1.5 top-1.5 flex flex-col items-start gap-1">
+                    <img src={it.poster_url} alt="" onClick={() => openDetail(it)}
+                      className="h-full w-full cursor-pointer object-cover" />
+                    <div className="absolute left-1.5 top-1.5 flex flex-col items-start gap-1 pointer-events-none">
                       <span className="rounded bg-black/70 px-1.5 py-0.5 text-[10px] uppercase text-gray-200">
                         {isSeries ? 'Serie' : 'Película'}
                       </span>
@@ -781,7 +784,7 @@ function LibraryManager({ adult = false }) {
                     )}
                   </div>
                   <div className="p-2.5">
-                    <p className="truncate text-sm font-semibold">{it.title}</p>
+                    <p onClick={() => openDetail(it)} className="cursor-pointer truncate text-sm font-semibold hover:text-brand">{it.title}</p>
                     <p className="truncate text-xs text-gray-400">
                       {isSeries
                         ? `${it.season_count} temp · ${it.episode_count} cap`
@@ -831,10 +834,11 @@ function LibraryManager({ adult = false }) {
                       {selected.has(it.id) ? <CheckSquare size={20} className="text-brand" /> : <Square size={20} />}
                     </button>
                   )}
-                  <img src={it.poster_url} alt="" className="h-16 w-11 flex-shrink-0 rounded object-cover" />
+                  <img src={it.poster_url} alt="" onClick={() => openDetail(it)}
+                    className="h-16 w-11 flex-shrink-0 cursor-pointer rounded object-cover transition-transform hover:scale-105" />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="truncate font-semibold">{it.title}</p>
+                      <p onClick={() => openDetail(it)} className="cursor-pointer truncate font-semibold hover:text-brand">{it.title}</p>
                       <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] uppercase text-gray-300">
                         {isSeries ? 'Serie' : 'Película'}
                       </span>

@@ -51,6 +51,28 @@ router.post('/', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+//  DELETE /api/progress/:mediaId — marca un título como NO visto.
+//  Borra todo el progreso del usuario para ese título (película o serie completa).
+// ---------------------------------------------------------------------------
+router.delete('/:mediaId', async (req, res) => {
+  const userId = req.user.id;
+  const mediaId = Number(req.params.mediaId);
+  if (!Number.isInteger(mediaId)) {
+    return res.status(400).json({ error: 'mediaId inválido' });
+  }
+  try {
+    await query(
+      `DELETE FROM watch_progress WHERE user_id = $1 AND media_id = $2`,
+      [userId, mediaId]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[DELETE /api/progress]', err);
+    res.status(500).json({ error: 'Error al actualizar el progreso' });
+  }
+});
+
+// ---------------------------------------------------------------------------
 //  GET /api/progress/:mediaId(/:episodeId)
 // ---------------------------------------------------------------------------
 router.get('/:mediaId/:episodeId?', async (req, res) => {

@@ -63,7 +63,7 @@ const isFsElement = () => document.fullscreenElement || document.webkitFullscree
 
 export default function VideoPlayer({
   hlsUrl, progressiveUrl, thumbnailsUrl, mediaId, episodeId = null, title, restart = false,
-  nextItem = null, recommendations = [], onNavigate, onBack,
+  nextItem = null, recommendations = [], onNavigate, onBack, homePath = '/',
 }) {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
@@ -455,7 +455,7 @@ export default function VideoPlayer({
           recommendations={recommendations}
           onPlayNext={(path) => onNavigate?.(path)}
           onReplay={handleReplay}
-          onHome={() => onNavigate?.('/')}
+          onHome={() => onNavigate?.(homePath)}
         />
       )}
     </div>

@@ -59,6 +59,10 @@ export const fetchProgress = (mediaId, episodeId = null) =>
   apiFetch(episodeId ? `${BASE}/progress/${mediaId}/${episodeId}` : `${BASE}/progress/${mediaId}`)
     .catch(() => ({ stopped_at: 0 }));
 
+// Marca un título como NO visto (borra el progreso del usuario para ese título).
+export const deleteProgress = (mediaId) =>
+  apiFetch(`${BASE}/progress/${mediaId}`, { method: 'DELETE' });
+
 export const saveProgress = (mediaId, episodeId, stoppedAt) =>
   fetch(`${BASE}/progress`, {
     method: 'POST',

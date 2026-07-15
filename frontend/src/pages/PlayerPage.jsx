@@ -23,6 +23,7 @@ export default function PlayerPage() {
   const [title, setTitle] = useState('');
   const [nextItem, setNextItem] = useState(null);       // "a continuación"
   const [recommendations, setRecommendations] = useState([]);
+  const [homePath, setHomePath] = useState('/');        // inicio según sea normal o +18
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -32,6 +33,7 @@ export default function PlayerPage() {
       .then(([media, similar]) => {
         let videoPath, hlsMaster, status, thumbnails;
         let next = null;
+        setHomePath(media.is_adult ? '/adultos' : '/'); // volver al inicio correcto
 
         if (epId) {
           // --- Capítulo de serie -------------------------------------------
@@ -124,6 +126,7 @@ export default function PlayerPage() {
         restart={restart}
         nextItem={nextItem}
         recommendations={recommendations}
+        homePath={homePath}
         // replace: true -> al saltar al siguiente video NO apilamos historial,
         // así el botón "Volver" siempre regresa a la página de origen (no al
         // video anterior que se reprodujo automáticamente).

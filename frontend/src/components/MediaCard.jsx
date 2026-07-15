@@ -10,18 +10,35 @@
 //    - Etiqueta: "Te quedan 45min" / "Visto" / duración total si no se ha visto.
 //    - En series, si hay progreso, muestra el capítulo en curso (T1:E3).
 // ----------------------------------------------------------------------------
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Play, ListVideo, Clock } from 'lucide-react';
+import { Play, ListVideo, Clock, EyeOff } from 'lucide-react';
 import { progressLabel } from '../utils/format.js';
+import { deleteProgress } from '../api.js';
 
-export default function MediaCard({ item }) {
+export default function MediaCard({ item, onChanged }) {
   const navigate = useNavigate();
   const isSeries = item.type === 'series';
-  const p = item.progress; // null si el usuario no ha visto nada
+  const [cleared, setCleared] = useState(false); // marcado como "no visto" localmente
+  const [menu, setMenu] = useState(null);         // { x, y } del menú contextual
+  const p = cleared ? null : item.progress;       // null si no hay/borramos el progreso
 
   const handleClick = () => {
     if (isSeries) navigate(`/series/${item.id}`);
     else navigate(`/movie/${item.id}`);
+  };
+
+  // Clic derecho: si hay progreso, ofrece "marcar como no vista".
+  const onContext = (e) => {
+    if (!item.progress || cleared) return;
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY });
+  };
+  const markUnwatched = async (e) => {
+    e.stopPropagation();
+    setMenu(null);
+    try { await deleteProgress(item.id); setCleared(true); onChanged?.(); }
+    catch { /* noop */ }
   };
 
   // Etiqueta de tiempo: restante si hay progreso, duración total si no.
@@ -31,6 +48,7 @@ export default function MediaCard({ item }) {
   return (
     <div
       onClick={handleClick}
+      onContextMenu={onContext}
       className="group relative w-28 flex-shrink-0 cursor-pointer transition-transform duration-200 hover:scale-105 sm:w-36 md:w-40"
     >
       <div className="relative aspect-[2/3] w-full overflow-hidden rounded-md shadow-lg">
@@ -69,6 +87,29 @@ export default function MediaCard({ item }) {
             </span>
           )}
         </div>
+      )}
+
+      {/* Menú contextual (clic derecho): marcar como no vista */}
+      {menu && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={(e) => { e.stopPropagation(); setMenu(null); }}
+            onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}
+          />
+          <div
+            className="fixed z-50 overflow-hidden rounded-lg border border-gray-700 bg-card shadow-2xl"
+            style={{ top: menu.y, left: menu.x }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={markUnwatched}
+              className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-gray-200 hover:bg-white/10"
+            >
+              <EyeOff size={15} /> Marcar como no vista
+            </button>
+          </div>
+        </>
       )}
     </div>
   );
