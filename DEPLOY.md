@@ -282,6 +282,39 @@ sudo find /var/www/streaming/frontend/dist -type f -exec chmod 644 {} \;
 > en lugar de `/var/www`, tendrás 403 casi seguro: Nginx no entra en `/home/*` por SELinux
 > ni por permisos. **Usa `/var/www/streaming`** como en esta guía, o mueve el proyecto ahí.
 
+### ⚠️ SELinux para los discos de media (evita el 502 al SUBIR)
+
+El backend **escribe** los videos, imágenes y HLS dentro de las rutas que configures en
+`MEDIA_ROOT` y en `MEDIA_DISKS`. Con SELinux en enforcing, si una de esas rutas no tiene
+el contexto de **escritura** correcto —muy típico en `/home` o cualquier carpeta de
+usuario— el backend no puede escribir y **la subida se corta a mitad** con un `502`
+(`upstream prematurely closed connection` en el log de Nginx).
+
+La solución es etiquetar **las subcarpetas de media** (`movies`, `series`, `images`,
+`hls`) de **cada disco** con un contexto de lectura/escritura. Pon en el bucle **todas
+las rutas** de tus discos (la de `MEDIA_ROOT` + cada `"path"` de `MEDIA_DISKS`):
+
+```bash
+sudo dnf install -y policycoreutils-python-utils   # si no lo tienes
+
+for DISK in /var/www/streaming/backend/media /home /mnt/vod2; do
+  for SUB in movies series images hls; do
+    sudo mkdir -p "$DISK/$SUB"
+    sudo semanage fcontext -a -t httpd_sys_rw_content_t "$DISK/$SUB(/.*)?"
+    sudo restorecon -Rv "$DISK/$SUB"
+  done
+done
+```
+
+> **Importante:**
+> - Etiqueta **solo las subcarpetas** (`$DISK/movies`, etc.), **nunca `/home` entero**:
+>   relabelar todo `/home` rompería el acceso SSH/login de los usuarios.
+> - **Cada vez que añadas un disco nuevo a `MEDIA_DISKS`**, agrega su ruta al bucle y
+>   vuelve a ejecutarlo (p. ej. con 5 discos, pon las 5 rutas). Así evitas el 502 al subir.
+> - Si `semanage` dice *"already defined"* para una ruta, usa `-m` en vez de `-a` para esa.
+> - **Nunca** dejes SELinux en permissive (`setenforce 0`) como solución: es menos seguro y
+>   se revierte al reiniciar. Deja siempre `sudo setenforce 1` (enforcing).
+
 ### Verifica que el build existe
 ```bash
 ls -la /var/www/streaming/frontend/dist   # debe haber index.html y la carpeta assets/
@@ -427,6 +460,7 @@ curl -I https://vod.cisne.com.pe/api/auth/me # 401 (sin sesión) = backend respo
 |---------|------------------|
 | **`403 Forbidden`** | SELinux o permisos sobre el frontend. Mira `sudo tail /var/log/nginx/error.log`: si dice `Permission denied` → falta el contexto SELinux (`semanage fcontext … httpd_sys_content_t` + `restorecon -Rv`) o los permisos de recorrido (`chmod o+x` en `/var/www`, `/var/www/streaming`, `/var/www/streaming/frontend`). Si dice `directory index … is forbidden` → falta `dist/index.html` (no corrió `npm run build`). Si clonaste en `/home/...`, muévelo a `/var/www/streaming`. |
 | `502 Bad Gateway` | El backend no está arriba (`pm2 status`) **o** falta `setsebool -P httpd_can_network_connect 1`. |
+| **`502` al SUBIR un video** (llega al 20-30% y corta; el log de Nginx dice `upstream prematurely closed connection`) | SELinux bloquea la **escritura** en la carpeta del disco (típico en `/home`). El proceso no se cae (`restarts: 0`), solo se corta esa subida. **Solución:** etiqueta las subcarpetas de media de ese disco con `httpd_sys_rw_content_t` (ver *SELinux para los discos de media*). Confírmalo con `sudo ausearch -m avc -ts recent` o probando con `sudo setenforce 0` (solo para diagnosticar). |
 | Login falla / "No autenticado" | `COOKIE_SECURE=true` requiere HTTPS. Asegúrate de entrar por `https://`. |
 | La subida se corta | Sube `client_max_body_size` y los `proxy_*_timeout` en Nginx (ya incluidos arriba). |
 | `pg_trgm does not exist` | Falta `postgresql16-contrib`. Instálalo y re-ejecuta el `schema.sql`. |
