@@ -5,14 +5,14 @@ Guía paso a paso para desplegar la app VOD en tu servidor.
 | Dato | Valor |
 |------|-------|
 | SO | AlmaLinux 10 |
-| Dominio | `test.cisne.com.pe` |
+| Dominio | `vod.cisne.com.pe` |
 | Base de datos | `vod` |
 | Contraseña BD (usuario `postgres`) | `$imb@29304044` |
 | Repositorio | `https://github.com/J0rg38/streaming.git` |
 | Backend (Node) | puerto interno `4000` |
 | Frontend | build estático servido por Nginx |
 
-> **Antes de empezar**: apunta el dominio `test.cisne.com.pe` (registro **A** en tu DNS)
+> **Antes de empezar**: apunta el dominio `vod.cisne.com.pe` (registro **A** en tu DNS)
 > a la **IP pública** de tu servidor. Sin esto, el certificado SSL fallará.
 
 Ejecuta los comandos como usuario con `sudo` (o `root`).
@@ -169,7 +169,7 @@ ADMIN_EMAIL=admin@cisne.com.pe
 ADMIN_PASSWORD=CambiaEstaClaveYa123!
 ADMIN_NAME=Administrador
 
-CLIENT_ORIGIN=https://test.cisne.com.pe
+CLIENT_ORIGIN=https://vod.cisne.com.pe
 COOKIE_SECURE=true
 EOF
 ```
@@ -220,7 +220,7 @@ Pega esto:
 ```nginx
 server {
     listen 80;
-    server_name test.cisne.com.pe;
+    server_name vod.cisne.com.pe;
 
     # --- Frontend (SPA React) ---
     root /var/www/streaming/frontend/dist;
@@ -295,10 +295,10 @@ sudo systemctl enable --now nginx
 
 Comprueba que responde TU sitio (y no el server por defecto de Nginx):
 ```bash
-curl -I -H "Host: test.cisne.com.pe" http://127.0.0.1/    # debe dar 200 OK
+curl -I -H "Host: vod.cisne.com.pe" http://127.0.0.1/    # debe dar 200 OK
 ```
 
-Ahora `http://test.cisne.com.pe` debería cargar la app (sin HTTPS todavía).
+Ahora `http://vod.cisne.com.pe` debería cargar la app (sin HTTPS todavía).
 
 ---
 
@@ -306,7 +306,7 @@ Ahora `http://test.cisne.com.pe` debería cargar la app (sin HTTPS todavía).
 
 ```bash
 sudo dnf install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d test.cisne.com.pe
+sudo certbot --nginx -d vod.cisne.com.pe
 ```
 Certbot edita tu Nginx para servir por HTTPS y configura la renovación automática.
 Elige la opción de **redirigir HTTP → HTTPS** cuando lo pregunte.
@@ -316,7 +316,7 @@ Comprueba la renovación automática:
 sudo systemctl status certbot-renew.timer
 ```
 
-Listo: entra a **https://test.cisne.com.pe** e inicia sesión con el
+Listo: entra a **https://vod.cisne.com.pe** e inicia sesión con el
 `ADMIN_EMAIL` / `ADMIN_PASSWORD` que pusiste en el `.env`.
 
 ---
@@ -355,6 +355,69 @@ sudo chown -R nginx:nginx /var/www/streaming/frontend/dist
 > Los archivos de video subidos viven en `/var/www/streaming/backend/media` y **no** se
 > tocan con `git pull` (están en `.gitignore`). Haz copias de seguridad de esa carpeta
 > y de la base de datos (`pg_dump`) periódicamente.
+
+---
+
+## 🌐 Cambiar el dominio
+
+Si mueves el sistema a otro dominio (por ejemplo de `test.cisne.com.pe` a
+`vod.cisne.com.pe`), sigue estos pasos **en orden**:
+
+**1. DNS** — crea/actualiza el registro **A** del nuevo dominio apuntando a la IP
+pública del servidor. Verifica que ya resuelve:
+```bash
+dig +short vod.cisne.com.pe     # debe devolver la IP de tu servidor
+```
+
+**2. Nginx** — cambia el `server_name` (o añade el nuevo) en tu configuración:
+```bash
+sudo nano /etc/nginx/conf.d/streaming.conf
+#   server_name vod.cisne.com.pe;      ← el nuevo dominio
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+**3. Certificado SSL** — emite el certificado para el nuevo dominio:
+```bash
+sudo certbot --nginx -d vod.cisne.com.pe
+```
+
+**4. Backend (`.env`)** — actualiza el origen permitido y reinicia:
+```bash
+cd /var/www/streaming/backend
+nano .env
+#   CLIENT_ORIGIN=https://vod.cisne.com.pe
+#   COOKIE_SECURE=true                  (obligatorio con HTTPS)
+pm2 restart vod-backend
+```
+
+**5. Frontend** — no requiere cambios: el navegador llama a `/api` en el **mismo
+dominio**, así que basta con que Nginx sirva el `dist` bajo el nuevo dominio.
+
+**6. App Android** — el APK apunta al dominio en `mobile/src/config.js`
+(`API_BASE`). Ya está actualizado a `https://vod.cisne.com.pe`. Publica el cambio:
+```bash
+cd mobile
+eas update --branch preview --message "Nuevo dominio vod.cisne.com.pe"
+```
+> Las OTA se descargan de los servidores de Expo (no del dominio del VOD), así que
+> llegan aunque cambies el dominio. **Publica la OTA antes de apagar el dominio
+> viejo** para que las apps ya instaladas migren solas; luego reabre la app dos veces.
+
+**7. (Opcional) Redirigir el dominio anterior** — para no romper enlaces/apps viejas,
+mantén un bloque que redirija el dominio antiguo al nuevo:
+```nginx
+server {
+    listen 80;
+    server_name test.cisne.com.pe;
+    return 301 https://vod.cisne.com.pe$request_uri;
+}
+```
+
+Comprueba al final:
+```bash
+curl -I https://vod.cisne.com.pe/            # 200 OK
+curl -I https://vod.cisne.com.pe/api/auth/me # 401 (sin sesión) = backend responde
+```
 
 ---
 

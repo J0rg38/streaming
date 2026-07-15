@@ -13,7 +13,7 @@ Edita `src/config.js` y pon la URL de tu backend:
 - **Pruebas en tu red local**: la IP de tu PC (no `localhost`), p.ej. `http://192.168.1.50:4000`.
   Averigua tu IP con `ipconfig` (Windows) o `ifconfig`/`ipconfig getifaddr en0` (Mac).
   El teléfono y el PC deben estar en la **misma red WiFi**.
-- **Producción**: `https://test.cisne.com.pe`.
+- **Producción**: `https://vod.cisne.com.pe`.
 
 ## 2. Instalar dependencias (SDK 54, el de tu Expo Go)
 > Si `npm install` da errores de `ERESOLVE` (conflicto de versiones entre
