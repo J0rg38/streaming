@@ -11,6 +11,7 @@
 //    - En series, si hay progreso, muestra el capítulo en curso (T1:E3).
 // ----------------------------------------------------------------------------
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Play, ListVideo, Clock, EyeOff } from 'lucide-react';
 import { progressLabel } from '../utils/format.js';
@@ -29,10 +30,13 @@ export default function MediaCard({ item, onChanged }) {
   };
 
   // Clic derecho: si hay progreso, ofrece "marcar como no vista".
+  // Fijamos la posición ya acotada a la ventana (para que no se salga).
   const onContext = (e) => {
     if (!item.progress || cleared) return;
     e.preventDefault();
-    setMenu({ x: e.clientX, y: e.clientY });
+    const x = Math.max(8, Math.min(e.clientX, window.innerWidth - 230));
+    const y = Math.max(8, Math.min(e.clientY, window.innerHeight - 60));
+    setMenu({ x, y });
   };
   const markUnwatched = async (e) => {
     e.stopPropagation();
@@ -89,16 +93,17 @@ export default function MediaCard({ item, onChanged }) {
         </div>
       )}
 
-      {/* Menú contextual (clic derecho): marcar como no vista */}
-      {menu && (
-        <>
+      {/* Menú contextual (clic derecho): marcar como no vista.
+          Se renderiza en un PORTAL a <body> para que 'position: fixed' sea
+          relativo a la ventana y no a la tarjeta (que usa hover:scale). */}
+      {menu && createPortal(
+        <div className="fixed inset-0 z-[100]"
+          onClick={(e) => { e.stopPropagation(); setMenu(null); }}
+          onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenu(null); }}
+          onWheel={() => setMenu(null)}
+        >
           <div
-            className="fixed inset-0 z-40"
-            onClick={(e) => { e.stopPropagation(); setMenu(null); }}
-            onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}
-          />
-          <div
-            className="fixed z-50 overflow-hidden rounded-lg border border-gray-700 bg-card shadow-2xl"
+            className="fixed w-[210px] overflow-hidden rounded-lg border border-gray-700 bg-card shadow-2xl"
             style={{ top: menu.y, left: menu.x }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -109,7 +114,8 @@ export default function MediaCard({ item, onChanged }) {
               <EyeOff size={15} /> Marcar como no vista
             </button>
           </div>
-        </>
+        </div>,
+        document.body,
       )}
     </div>
   );
