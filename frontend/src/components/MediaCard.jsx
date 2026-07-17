@@ -13,7 +13,7 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { Play, ListVideo, Clock, EyeOff } from 'lucide-react';
+import { Play, ListVideo, Clock, EyeOff, CalendarClock } from 'lucide-react';
 import { progressLabel } from '../utils/format.js';
 import { deleteProgress } from '../api.js';
 
@@ -70,6 +70,13 @@ export default function MediaCard({ item, onChanged }) {
         <span className="absolute left-2 top-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
           {isSeries ? 'Serie' : 'Película'}
         </span>
+
+        {/* Badge "Próximamente" para próximos estrenos */}
+        {item.coming_soon && (
+          <span className="absolute right-2 top-2 flex items-center gap-1 rounded bg-brand/90 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+            <CalendarClock size={11} /> Próximamente
+          </span>
+        )}
 
         {/* Barra de progreso ya visto (parte inferior de la imagen) */}
         {percent > 0 && (

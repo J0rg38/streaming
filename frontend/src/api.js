@@ -117,6 +117,13 @@ export const updateMediaDetails = (id, formData) =>
   apiFetch(`${BASE}/admin/media/${id}`, { method: 'PATCH', body: formData });
 export const deleteEpisode     = (id) => apiFetch(`${BASE}/admin/episodes/${id}`, { method: 'DELETE' });
 
+// Próximos estrenos: crear (metadata + póster/banner, sin video) y regularizar
+// (subir el video luego → deja de ser "próximamente" y se transcodifica).
+export const createUpcoming    = (formData) =>
+  apiFetch(`${BASE}/admin/upcoming`, { method: 'POST', body: formData });
+export const uploadUpcomingVideo = (id, formData, onProgress, disk = '') =>
+  uploadForm(`${BASE}/admin/upcoming/${id}/video${disk ? `?disk=${disk}` : ''}`, formData, onProgress);
+
 // Descarga del video original de una película (URL para <a href> / descarga).
 export const mediaDownloadUrl  = (id) => `${BASE}/admin/media/${id}/download`;
 

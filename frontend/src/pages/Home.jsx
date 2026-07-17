@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Play, Info, Settings, UploadCloud, LogOut, Search, Lock } from 'lucide-react';
+import { Play, Info, Settings, UploadCloud, LogOut, Search, Lock, Home as HomeIcon } from 'lucide-react';
 import { fetchCatalog } from '../api.js';
 import Carousel from '../components/Carousel.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
@@ -13,6 +13,7 @@ export default function Home() {
   const [continueWatching, setContinueWatching] = useState([]);
   const [recentlyAdded, setRecentlyAdded] = useState([]);
   const [stellar, setStellar] = useState([]);           // sección "Estelares"
+  const [comingSoon, setComingSoon] = useState([]);     // sección "Próximamente"
   const [bannerItems, setBannerItems] = useState([]);   // títulos del banner rotativo
   const [heroIndex, setHeroIndex] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -26,6 +27,7 @@ export default function Home() {
         setContinueWatching(data.continueWatching || []);
         setRecentlyAdded(data.recentlyAdded || []);
         setStellar(data.featured || []);
+        setComingSoon(data.comingSoon || []);
         // Banner rotativo: las últimas 5 añadidas + los destacados (sin duplicar).
         const seen = new Set();
         const banner = [...(data.recentlyAdded || []).slice(0, 5), ...(data.featured || [])]
@@ -70,6 +72,13 @@ export default function Home() {
         <span className="text-xl font-extrabold text-brand sm:text-2xl">MI VOD</span>
       </Link>
       <div className="flex items-center gap-2 sm:gap-3">
+        <Link
+          to="/"
+          className="flex items-center gap-2 rounded bg-white/10 px-3 py-2 text-sm font-medium backdrop-blur hover:bg-white/20 sm:px-4"
+          title="Inicio"
+        >
+          <HomeIcon size={16} /> <span className="hidden sm:inline">Inicio</span>
+        </Link>
         <Link
           to="/search"
           className="flex items-center gap-2 rounded bg-white/10 px-3 py-2 text-sm font-medium backdrop-blur hover:bg-white/20 sm:px-4"
@@ -192,13 +201,17 @@ export default function Home() {
         {continueWatching.length > 0 && (
           <Carousel title="Continuar viendo" items={continueWatching} />
         )}
-        {/* Fila "Recién añadidos": los últimos títulos subidos */}
+        {/* Fila "Estelares": destacados elegidos por el admin (por encima de recientes) */}
+        {stellar.length > 0 && (
+          <Carousel title="✨ Estelares" items={stellar} />
+        )}
+        {/* Fila "Recién añadidos": los últimos títulos subidos (máx. 12) */}
         {recentlyAdded.length > 0 && (
           <Carousel title="Recién añadidos" items={recentlyAdded} />
         )}
-        {/* Fila "Estelares": destacados elegidos por el admin */}
-        {stellar.length > 0 && (
-          <Carousel title="✨ Estelares" items={stellar} />
+        {/* Fila "Próximamente": próximos estrenos (aún sin video) */}
+        {comingSoon.length > 0 && (
+          <Carousel title="🔜 Próximamente" items={comingSoon} />
         )}
         {rails.map((rail) => (
           <Carousel key={rail.genre} title={rail.genre} items={rail.items} />

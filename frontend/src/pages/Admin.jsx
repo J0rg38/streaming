@@ -14,12 +14,14 @@ import {
   Library, Search, Trash2, ChevronDown, ChevronRight, Loader2, LogOut,
   Users, ShieldCheck, User as UserIcon, UserPlus, Pencil, X, Star,
   HardDrive, Lock, List, LayoutGrid, Download, Database, Upload, CheckSquare, Square,
+  CalendarClock, Video,
 } from 'lucide-react';
 import {
   uploadForm, fetchAdminSeries, fetchLibrary, fetchAdminMedia,
   deleteMedia, deleteEpisode, fetchUsers, deleteUser, updateUserRole,
   createUser, updateUser, fetchTranscodeProgress, setFeatured, updateMediaDetails,
   fetchDisks, mediaDownloadUrl, backupUrl, restoreBackup,
+  createUpcoming,
 } from '../api.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { formatMinutes, formatBytes } from '../utils/format.js';
@@ -218,6 +220,60 @@ function MovieForm({ onDone }) {
         {reading ? 'Leyendo duración…' : 'Subir película'}
       </button>
       <ProgressBar progress={progress} status={status} />
+    </form>
+  );
+}
+
+// ===========================================================================
+//  Formulario: PRÓXIMO ESTRENO (película sin video todavía)
+// ===========================================================================
+function UpcomingForm({ onDone }) {
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    setSaving(true); setMsg(null);
+    try {
+      await createUpcoming(new FormData(e.target));
+      e.target.reset();
+      setMsg({ ok: true, text: 'Próximo estreno creado. Aparecerá en la sección «Próximamente».' });
+      onDone?.();
+    } catch (err) {
+      setMsg({ ok: false, text: err.message || 'No se pudo crear' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form onSubmit={onSubmit} className="space-y-4">
+      <div className="flex items-center gap-2 rounded-lg border border-brand/30 bg-brand/10 px-3 py-2 text-sm text-brand">
+        <CalendarClock size={18} /> Sube la ficha del próximo estreno (sin video). El video lo añades luego desde la Biblioteca.
+      </div>
+      <Field label="Título *"><input name="title" required className={inputCls} placeholder="Ej. Dune: Parte Tres" /></Field>
+      <Field label="Descripción"><textarea name="description" rows={3} className={inputCls} placeholder="Sinopsis…" /></Field>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <Field label="Año"><input name="release_year" type="number" className={inputCls} placeholder="2026" /></Field>
+        <Field label="Fecha de estreno"><input name="release_date" type="date" className={inputCls} /></Field>
+        <Field label="Géneros (separados por coma)"><input name="genres" className={inputCls} placeholder="Ciencia ficción" /></Field>
+      </div>
+      <Field label="Actores / reparto (separados por coma)">
+        <input name="actors" className={inputCls} placeholder="Timothée Chalamet, Zendaya" />
+      </Field>
+      <Field label="Etiquetas (separadas por coma)">
+        <input name="tags" className={inputCls} placeholder="Dune, Villeneuve" />
+      </Field>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field label="Póster"><input name="poster" type="file" accept="image/*" className={inputCls} /></Field>
+        <Field label="Banner"><input name="banner" type="file" accept="image/*" className={inputCls} /></Field>
+      </div>
+      <button type="submit" disabled={saving}
+        className="flex items-center gap-2 rounded bg-brand px-5 py-2 font-semibold hover:bg-brand-dark disabled:opacity-50">
+        {saving ? <Loader2 className="animate-spin" size={18} /> : <CalendarClock size={18} />}
+        {saving ? 'Guardando…' : 'Crear próximo estreno'}
+      </button>
+      {msg && <p className={`text-sm ${msg.ok ? 'text-green-400' : 'text-red-400'}`}>{msg.text}</p>}
     </form>
   );
 }
@@ -498,6 +554,55 @@ function SeriesEpisodes({ seriesId, onChanged, progress = {}, reloadSignal = 0 }
 }
 
 // ---------------------------------------------------------------------------
+//  Modal para REGULARIZAR un próximo estreno: subir su video y publicarlo.
+// ---------------------------------------------------------------------------
+function RegularizeModal({ item, onClose, onDone }) {
+  const { progress, status, run } = useUpload();
+  const [disk, setDisk] = useState('');
+  const [reading, setReading] = useState(false);
+
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const video = fd.get('video');
+    if (!video || !video.size) return;
+    setReading(true);
+    const dur = await getVideoDuration(video);
+    setReading(false);
+    if (dur) fd.set('duration', String(Math.round(dur)));
+    try {
+      await run(`/api/admin/upcoming/${item.id}/video?disk=${disk}`, fd);
+      onDone?.();
+    } catch { /* el error se muestra en la barra */ }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-xl bg-surface p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="flex items-center gap-2 text-lg font-bold"><Video size={20} className="text-brand" /> Subir video</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-white"><X size={20} /></button>
+        </div>
+        <p className="mb-4 text-sm text-gray-400">
+          Al subir el video, <span className="font-semibold text-gray-200">«{item.title}»</span> saldrá de
+          «Próximamente», quedará disponible y empezará a transcodificarse.
+        </p>
+        <form onSubmit={onSubmit} className="space-y-4">
+          <DiskPicker value={disk} onChange={setDisk} />
+          <Field label="Video *"><input name="video" type="file" accept="video/*" required className={inputCls} /></Field>
+          <button type="submit" disabled={status === 'uploading' || reading}
+            className="flex items-center gap-2 rounded bg-brand px-5 py-2 font-semibold hover:bg-brand-dark disabled:opacity-50">
+            {reading ? <Loader2 className="animate-spin" size={18} /> : <UploadCloud size={18} />}
+            {reading ? 'Leyendo duración…' : 'Subir y publicar'}
+          </button>
+          <ProgressBar progress={progress} status={status} />
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 //  Modal de edición de un título (película o serie).
 //  Precarga los datos actuales y permite cambiar textos, etiquetas e imágenes.
 // ---------------------------------------------------------------------------
@@ -590,6 +695,7 @@ function LibraryManager({ adult = false }) {
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState(null);
   const [selected, setSelected] = useState(new Set()); // ids de películas seleccionadas
+  const [regularize, setRegularize] = useState(null);  // próximo estreno al que subir video
   const navigate = useNavigate();
   const openDetail = (it) => navigate(it.type === 'series' ? `/series/${it.id}` : `/movie/${it.id}`);
   const [progress, setProgress] = useState({}); // { 'movie-8': 42, ... }
@@ -651,8 +757,8 @@ function LibraryManager({ adult = false }) {
     catch { load(); }
   };
 
-  // --- Selección y descarga (solo películas) ------------------------------
-  const movieItems = data.items.filter((it) => it.type === 'movie');
+  // --- Selección y descarga (solo películas CON video) --------------------
+  const movieItems = data.items.filter((it) => it.type === 'movie' && !it.coming_soon);
   const allMoviesSelected = movieItems.length > 0 && movieItems.every((it) => selected.has(it.id));
   const toggleSelect = (id) =>
     setSelected((prev) => {
@@ -775,8 +881,8 @@ function LibraryManager({ adult = false }) {
                         <span className="rounded bg-yellow-500/90 px-1.5 py-0.5 text-[10px] font-bold text-black">Estelar</span>
                       )}
                     </div>
-                    {/* Checkbox de selección (solo películas) */}
-                    {isMovie && (
+                    {/* Checkbox de selección (solo películas con video) */}
+                    {isMovie && !it.coming_soon && (
                       <button onClick={() => toggleSelect(it.id)} title="Seleccionar"
                         className="absolute right-1.5 top-1.5 rounded bg-black/60 p-0.5 text-white hover:bg-black/80">
                         {isSel ? <CheckSquare size={20} className="text-brand" /> : <Square size={20} />}
@@ -790,10 +896,12 @@ function LibraryManager({ adult = false }) {
                         ? `${it.season_count} temp · ${it.episode_count} cap`
                         : `${it.release_year || 's/año'}${it.duration ? ` · ${formatMinutes(it.duration)}` : ''}`}
                     </p>
-                    {/* Estado de transcodificación FUERA de la imagen */}
+                    {/* Estado FUERA de la imagen: próximamente o transcodificación */}
                     {isMovie && (
                       <div className="mt-1.5">
-                        <StatusBadge status={it.transcode_status} percent={progress[`movie-${it.id}`]} />
+                        {it.coming_soon
+                          ? <span className="inline-flex items-center gap-1 rounded bg-brand/20 px-1.5 py-0.5 text-[10px] font-semibold text-brand"><CalendarClock size={11} /> Próximamente</span>
+                          : <StatusBadge status={it.transcode_status} percent={progress[`movie-${it.id}`]} />}
                       </div>
                     )}
                     <div className="mt-2 flex items-center gap-1.5">
@@ -801,7 +909,13 @@ function LibraryManager({ adult = false }) {
                         className="flex-1 rounded bg-white/10 p-1.5 text-gray-200 hover:bg-white/20">
                         <Pencil size={14} className="mx-auto" />
                       </button>
-                      {isMovie && (
+                      {isMovie && it.coming_soon && (
+                        <button onClick={() => setRegularize(it)} title="Subir video (regularizar)"
+                          className="flex-1 rounded bg-brand/20 p-1.5 text-brand hover:bg-brand/30">
+                          <Video size={14} className="mx-auto" />
+                        </button>
+                      )}
+                      {isMovie && !it.coming_soon && (
                         <button onClick={() => triggerDownload(it.id)} title="Descargar video original"
                           className="flex-1 rounded bg-white/10 p-1.5 text-gray-200 hover:bg-white/20">
                           <Download size={14} className="mx-auto" />
@@ -829,6 +943,8 @@ function LibraryManager({ adult = false }) {
                     <button onClick={() => setExpanded(open ? null : it.id)} className="text-gray-400 hover:text-white">
                       {open ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
                     </button>
+                  ) : it.coming_soon ? (
+                    <span className="w-5 flex-shrink-0" />
                   ) : (
                     <button onClick={() => toggleSelect(it.id)} title="Seleccionar" className="flex-shrink-0 text-gray-400 hover:text-white">
                       {selected.has(it.id) ? <CheckSquare size={20} className="text-brand" /> : <Square size={20} />}
@@ -842,7 +958,9 @@ function LibraryManager({ adult = false }) {
                       <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] uppercase text-gray-300">
                         {isSeries ? 'Serie' : 'Película'}
                       </span>
-                      {!isSeries && <StatusBadge status={it.transcode_status} percent={progress[`movie-${it.id}`]} />}
+                      {!isSeries && (it.coming_soon
+                        ? <span className="inline-flex items-center gap-1 rounded bg-brand/20 px-2 py-0.5 text-[11px] font-semibold text-brand"><CalendarClock size={12} /> Próximamente</span>
+                        : <StatusBadge status={it.transcode_status} percent={progress[`movie-${it.id}`]} />)}
                     </div>
                     <p className="text-xs text-gray-400">
                       {isSeries
@@ -861,7 +979,13 @@ function LibraryManager({ adult = false }) {
                       className="flex flex-1 items-center justify-center gap-1 rounded bg-white/10 px-3 py-1.5 text-sm text-gray-200 hover:bg-white/20 sm:flex-none">
                       <Pencil size={15} /> Editar
                     </button>
-                    {!isSeries && (
+                    {!isSeries && it.coming_soon && (
+                      <button onClick={() => setRegularize(it)} title="Subir video (regularizar)"
+                        className="flex flex-1 items-center justify-center gap-1 rounded bg-brand/20 px-3 py-1.5 text-sm text-brand hover:bg-brand/30 sm:flex-none">
+                        <Video size={15} /> Subir video
+                      </button>
+                    )}
+                    {!isSeries && !it.coming_soon && (
                       <button onClick={() => triggerDownload(it.id)} title="Descargar video original"
                         className="flex flex-1 items-center justify-center gap-1 rounded bg-white/10 px-3 py-1.5 text-sm text-gray-200 hover:bg-white/20 sm:flex-none">
                         <Download size={15} /> Descargar
@@ -917,6 +1041,15 @@ function LibraryManager({ adult = false }) {
           id={editId}
           onClose={() => setEditId(null)}
           onSaved={() => { setEditId(null); load(); }}
+        />
+      )}
+
+      {/* Modal para regularizar un próximo estreno (subir su video) */}
+      {regularize && (
+        <RegularizeModal
+          item={regularize}
+          onClose={() => setRegularize(null)}
+          onDone={() => { setRegularize(null); load(); }}
         />
       )}
     </div>
@@ -1325,9 +1458,10 @@ export default function Admin() {
     {
       title: 'Subir',
       items: [
-        { key: 'movie',   label: 'Película', icon: Film },
-        { key: 'series',  label: 'Serie',    icon: Clapperboard },
-        { key: 'episode', label: 'Capítulo', icon: ListPlus },
+        { key: 'movie',    label: 'Película',     icon: Film },
+        { key: 'upcoming', label: 'Próximamente', icon: CalendarClock },
+        { key: 'series',   label: 'Serie',        icon: Clapperboard },
+        { key: 'episode',  label: 'Capítulo',     icon: ListPlus },
       ],
     },
     {
@@ -1364,6 +1498,7 @@ export default function Admin() {
       {tab === 'library'   && <LibraryManager />}
       {tab === 'library18' && <LibraryManager adult />}
       {tab === 'movie'     && <MovieForm onDone={refreshSeries} />}
+      {tab === 'upcoming'  && <UpcomingForm />}
       {tab === 'series'    && <SeriesForm onCreated={refreshSeries} />}
       {tab === 'episode'   && <EpisodeForm series={series} refreshSeries={refreshSeries} />}
       {tab === 'users'     && <UserManager />}

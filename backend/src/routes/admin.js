@@ -164,6 +164,83 @@ router.post(
 );
 
 // ===========================================================================
+//  POST /api/admin/upcoming  — crea un PRÓXIMO ESTRENO (película sin video).
+//  Sube toda la metadata + póster/banner. El video se añade luego (regularizar).
+// ===========================================================================
+router.post(
+  '/upcoming',
+  imageUpload.fields([
+    { name: 'poster', maxCount: 1 },
+    { name: 'banner', maxCount: 1 },
+  ]),
+  async (req, res) => {
+    try {
+      const { title, description, release_year, release_date } = req.body;
+      if (!title) return res.status(400).json({ error: 'El título es obligatorio' });
+
+      const posterUrl = imageUrl(req.files?.poster?.[0]) || 'https://picsum.photos/seed/soon/300/450';
+      const bannerUrl = imageUrl(req.files?.banner?.[0]) || posterUrl;
+      const genres = parseGenres(req.body.genres);
+
+      const { rows } = await query(
+        `INSERT INTO media (title, description, type, release_year, release_date, genres, actors, tags,
+                            poster_url, banner_url, video_path, is_adult, coming_soon, transcode_status)
+         VALUES ($1, $2, 'movie', $3, $4, $5, $6, $7, $8, $9, NULL, $10, true, 'none')
+         RETURNING id, title, type`,
+        [
+          title,
+          description || null,
+          release_year ? Number(release_year) : null,
+          release_date || null,
+          genres,
+          parseGenres(req.body.actors),
+          parseGenres(req.body.tags),
+          posterUrl,
+          bannerUrl,
+          isAdultGenres(genres),
+        ]
+      );
+      res.status(201).json(rows[0]);
+    } catch (err) {
+      console.error('[POST /api/admin/upcoming]', err);
+      res.status(500).json({ error: 'Error al crear el próximo estreno' });
+    }
+  }
+);
+
+// ===========================================================================
+//  POST /api/admin/upcoming/:id/video  — REGULARIZA un próximo estreno: sube el
+//  video, lo marca como disponible (coming_soon=false) y encola la transcodificación.
+// ===========================================================================
+router.post('/upcoming/:id/video', movieUpload.single('video'), async (req, res) => {
+  const id = Number(req.params.id);
+  const videoFile = req.file;
+  try {
+    if (!videoFile) return res.status(400).json({ error: 'Falta el archivo de video' });
+    const { rows: found } = await query(
+      `SELECT id FROM media WHERE id = $1 AND type = 'movie'`, [id]
+    );
+    if (found.length === 0) {
+      fs.rm(videoFile.path, { force: true }, () => {});
+      return res.status(404).json({ error: 'Película no encontrada' });
+    }
+    const { duration } = req.body;
+    await query(
+      `UPDATE media
+          SET video_path = $1, coming_soon = false, transcode_status = 'pending',
+              duration = COALESCE($2, duration)
+        WHERE id = $3`,
+      [videoFile.path, duration ? Math.round(Number(duration)) : null, id]
+    );
+    enqueueTranscode({ kind: 'movie', id, videoPath: videoFile.path });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[POST /api/admin/upcoming/:id/video]', err);
+    res.status(500).json({ error: 'Error al subir el video' });
+  }
+});
+
+// ===========================================================================
 //  POST /api/admin/series  — crea una serie (sin video; los videos van en
 //  los capítulos). Acepta poster/banner opcionales.
 // ===========================================================================
@@ -359,7 +436,7 @@ router.get('/library', async (req, res) => {
     // en qué disco está guardado.
     const { rows: items } = await query(
       `SELECT m.id, m.title, m.type, m.release_year, m.genres, m.poster_url,
-              m.duration, m.transcode_status, m.featured, m.created_at,
+              m.duration, m.transcode_status, m.featured, m.coming_soon, m.created_at,
               COALESCE(ec.episode_count, 0) AS episode_count,
               COALESCE(ec.season_count, 0)  AS season_count,
               COALESCE(m.video_path,

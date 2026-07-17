@@ -65,7 +65,7 @@ function buildLensRails(enriched, seen, field, prefix, maxRails) {
 
 async function buildCatalog(userId, adult) {
   const { rows: media } = await query(
-    `SELECT id, title, description, type, release_year,
+    `SELECT id, title, description, type, release_year, release_date, coming_soon,
             genres, actors, tags, poster_url, banner_url, video_path, duration, featured
        FROM media
       WHERE is_adult = $1
@@ -104,40 +104,46 @@ async function buildCatalog(userId, adult) {
     return { ...item, progress };
   });
 
+  // "Próximamente": títulos sin video todavía (próximos estrenos). Van en su
+  // propia sección y NO aparecen en el resto del catálogo (no se pueden ver aún).
+  const comingSoon = enriched.filter((m) => m.coming_soon).slice(0, 20);
+  const playable = enriched.filter((m) => !m.coming_soon);
+
   // Dedup ACUMULATIVO en el orden de visualización: cada título aparece en una
-  // sola sección. Prioridad: continuar viendo → recién añadidos → destacados →
+  // sola sección. Prioridad: continuar viendo → DESTACADOS → recién añadidos →
   // (adultos) recomendaciones por actriz/etiqueta → géneros.
   const seen = new Set();
   const take = (arr) => arr.filter((m) => !seen.has(m.id));
   const mark = (arr) => { arr.forEach((m) => seen.add(m.id)); return arr; };
 
   const continueWatching = mark(
-    enriched
+    playable
       .filter((m) => m.progress && (m.progress.percent === null || m.progress.percent < 95))
       .slice(0, 20)
   );
-  const recentlyAdded = mark(take(enriched).slice(0, 15));
-  const featured = mark(take(enriched).filter((m) => m.featured));
+  // Destacados PRIMERO (prioridad sobre recientes): un estelar siempre sale aquí.
+  const featured = mark(take(playable).filter((m) => m.featured));
+  // Recién añadidos: máximo 12; los más antiguos bajan a los carruseles de género.
+  const recentlyAdded = mark(take(playable).slice(0, 12));
 
   // Recomendaciones inteligentes (sólo adultos): por actriz y por etiquetas.
   const discovery = adult
     ? [
-        ...buildLensRails(enriched, seen, 'actors', '', 6),
-        ...buildLensRails(enriched, seen, 'tags', '#', 6),
+        ...buildLensRails(playable, seen, 'actors', '', 6),
+        ...buildLensRails(playable, seen, 'tags', '#', 6),
       ]
     : [];
 
-  // Géneros: excluimos lo que ya salió en las secciones de arriba (continuar
-  // viendo, recientes, destacados, recomendaciones). Un título SÍ puede estar en
-  // varios géneros (navegación rica), pero nunca repite lo ya destacado arriba.
+  // Géneros: excluimos lo que ya salió arriba. Un título SÍ puede estar en varios
+  // géneros (navegación rica), pero nunca repite lo ya destacado arriba.
   const byGenre = {};
-  for (const item of take(enriched)) {
+  for (const item of take(playable)) {
     const genres = item.genres?.length ? item.genres : ['Otros'];
     for (const g of genres) (byGenre[g] ||= []).push(item);
   }
   const rails = Object.entries(byGenre).map(([genre, items]) => ({ genre, items }));
 
-  return { continueWatching, recentlyAdded, featured, discovery, rails, all: enriched };
+  return { continueWatching, featured, recentlyAdded, comingSoon, discovery, rails, all: playable };
 }
 
 router.get('/', async (req, res) => {
@@ -271,7 +277,7 @@ router.get('/:id', async (req, res) => {
 
   try {
     const { rows } = await query(
-      `SELECT id, title, description, type, release_year,
+      `SELECT id, title, description, type, release_year, release_date, coming_soon,
               genres, actors, poster_url, banner_url, video_path, duration,
               transcode_status, hls_master, is_adult
          FROM media WHERE id = $1`,

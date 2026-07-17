@@ -7,7 +7,7 @@
 // ----------------------------------------------------------------------------
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Play, RotateCcw, ArrowLeft, Clock } from 'lucide-react';
+import { Play, RotateCcw, ArrowLeft, Clock, Home, CalendarClock } from 'lucide-react';
 import { fetchMedia, fetchSimilar } from '../api.js';
 import { formatMinutes, progressLabel } from '../utils/format.js';
 import Carousel from '../components/Carousel.jsx';
@@ -67,12 +67,21 @@ export default function MovieDetail() {
         <div className="absolute inset-0 bg-gradient-to-t from-surface via-surface/50 to-transparent" />
         <div className="absolute inset-0 bg-gradient-to-r from-surface/80 to-transparent" />
 
-        <button
-          onClick={() => navigate(-1)}
-          className="absolute left-4 top-4 flex items-center gap-1 rounded bg-black/50 px-3 py-1.5 text-sm hover:bg-black/70 sm:left-6 sm:top-6"
-        >
-          <ArrowLeft size={18} /> Volver
-        </button>
+        <div className="absolute left-4 top-4 flex items-center gap-2 sm:left-6 sm:top-6">
+          <button
+            onClick={() => navigate(-1)}
+            className="flex items-center gap-1 rounded bg-black/50 px-3 py-1.5 text-sm hover:bg-black/70"
+          >
+            <ArrowLeft size={18} /> Volver
+          </button>
+          <button
+            onClick={() => navigate(movie.is_adult ? '/adultos' : '/')}
+            title="Ir al inicio"
+            className="flex items-center gap-1 rounded bg-black/50 px-3 py-1.5 text-sm hover:bg-black/70"
+          >
+            <Home size={18} /> <span className="hidden sm:inline">Inicio</span>
+          </button>
+        </div>
       </div>
 
       {/* -------- Información + acciones -------- */}
@@ -117,26 +126,37 @@ export default function MovieDetail() {
               </p>
             )}
 
-            {/* Botones */}
-            <div className="mt-6 flex flex-wrap gap-3">
-              <button
-                onClick={() => navigate(`/watch/${movie.id}`)}
-                className="flex items-center gap-2 rounded bg-white px-6 py-2.5 font-semibold text-black hover:bg-gray-200 sm:px-8 sm:py-3"
-              >
-                {started ? <RotateCcw size={20} /> : <Play size={20} />}
-                {started ? 'Reanudar' : 'Reproducir'}
-              </button>
-
-              {/* Si ya empezó, permitir también empezar de cero */}
-              {started && (
+            {/* Botones — o aviso de "Próximamente" si aún no tiene video */}
+            {movie.coming_soon ? (
+              <div className="mt-6 inline-flex items-center gap-2 rounded-lg border border-brand/40 bg-brand/10 px-5 py-3 font-semibold text-brand">
+                <CalendarClock size={20} /> Próximamente
+                {movie.release_date && (
+                  <span className="text-gray-300">
+                    · Estreno {new Date(movie.release_date).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div className="mt-6 flex flex-wrap gap-3">
                 <button
-                  onClick={() => navigate(`/watch/${movie.id}?restart=1`)}
-                  className="flex items-center gap-2 rounded bg-gray-600/70 px-5 py-2.5 font-semibold hover:bg-gray-600 sm:px-6 sm:py-3"
+                  onClick={() => navigate(`/watch/${movie.id}`)}
+                  className="flex items-center gap-2 rounded bg-white px-6 py-2.5 font-semibold text-black hover:bg-gray-200 sm:px-8 sm:py-3"
                 >
-                  <Play size={20} /> Ver desde el inicio
+                  {started ? <RotateCcw size={20} /> : <Play size={20} />}
+                  {started ? 'Reanudar' : 'Reproducir'}
                 </button>
-              )}
-            </div>
+
+                {/* Si ya empezó, permitir también empezar de cero */}
+                {started && (
+                  <button
+                    onClick={() => navigate(`/watch/${movie.id}?restart=1`)}
+                    className="flex items-center gap-2 rounded bg-gray-600/70 px-5 py-2.5 font-semibold hover:bg-gray-600 sm:px-6 sm:py-3"
+                  >
+                    <Play size={20} /> Ver desde el inicio
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

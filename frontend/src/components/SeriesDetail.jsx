@@ -11,7 +11,7 @@
 // ----------------------------------------------------------------------------
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Play, ArrowLeft, Clock } from 'lucide-react';
+import { Play, ArrowLeft, Clock, Home } from 'lucide-react';
 import { fetchMedia, fetchSimilar } from '../api.js';
 import { formatClock, progressLabel } from '../utils/format.js';
 import Carousel from './Carousel.jsx';
@@ -64,12 +64,21 @@ export default function SeriesDetail() {
         />
         <div className="absolute inset-0 bg-gradient-to-t from-surface via-surface/50 to-transparent" />
 
-        <button
-          onClick={() => navigate(-1)}
-          className="absolute left-4 top-4 flex items-center gap-1 rounded bg-black/50 px-3 py-1.5 text-sm hover:bg-black/70 sm:left-6 sm:top-6"
-        >
-          <ArrowLeft size={18} /> Volver
-        </button>
+        <div className="absolute left-4 top-4 flex items-center gap-2 sm:left-6 sm:top-6">
+          <button
+            onClick={() => navigate(-1)}
+            className="flex items-center gap-1 rounded bg-black/50 px-3 py-1.5 text-sm hover:bg-black/70"
+          >
+            <ArrowLeft size={18} /> Volver
+          </button>
+          <button
+            onClick={() => navigate(series.is_adult ? '/adultos' : '/')}
+            title="Ir al inicio"
+            className="flex items-center gap-1 rounded bg-black/50 px-3 py-1.5 text-sm hover:bg-black/70"
+          >
+            <Home size={18} /> <span className="hidden sm:inline">Inicio</span>
+          </button>
+        </div>
 
         <div className="absolute bottom-4 left-4 right-4 max-w-2xl sm:bottom-6 sm:left-8 sm:right-auto">
           <h1 className="text-2xl font-extrabold drop-shadow-lg sm:text-4xl">{series.title}</h1>
