@@ -134,12 +134,15 @@ async function buildCatalog(userId, adult) {
       ]
     : [];
 
-  // Géneros: excluimos lo que ya salió arriba. Un título SÍ puede estar en varios
-  // géneros (navegación rica), pero nunca repite lo ya destacado arriba.
+  // Géneros: dedup TOTAL — cada título aparece en UN SOLO género. Para no
+  // amontonar todo en un mismo género, asignamos cada título al de sus géneros
+  // que MENOS elementos tenga hasta el momento (reparto equilibrado).
   const byGenre = {};
+  const count = (g) => byGenre[g]?.length || 0;
   for (const item of take(playable)) {
     const genres = item.genres?.length ? item.genres : ['Otros'];
-    for (const g of genres) (byGenre[g] ||= []).push(item);
+    const g = genres.reduce((best, cur) => (count(cur) < count(best) ? cur : best), genres[0]);
+    (byGenre[g] ||= []).push(item);
   }
   const rails = Object.entries(byGenre).map(([genre, items]) => ({ genre, items }));
 
