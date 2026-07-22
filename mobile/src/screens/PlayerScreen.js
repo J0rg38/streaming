@@ -15,9 +15,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as NavigationBar from 'expo-navigation-bar';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { fetchMedia, streamUrl, authHeaders, fetchProgress, saveProgress, imageSource } from '../api';
+import {
+  fetchMedia, fetchSimilar, streamUrl, authHeaders, fetchProgress, saveProgress, imageSource,
+} from '../api';
 import { getLocalProgress, saveLocalProgress } from '../progress';
 import Focusable from '../components/Focusable';
+import EndOverlay from '../components/EndOverlay';
 import {
   PlayIcon, PauseIcon, ChevronLeftIcon, RotateCcwIcon, RotateCwIcon,
   MaximizeIcon, MinimizeIcon,
@@ -78,6 +81,8 @@ export default function PlayerScreen({ route, navigation }) {
   const [fit, setFit] = useState('contain'); // 'contain' (ajustar) | 'cover' (expandir)
   const [thumbsPath, setThumbsPath] = useState(null);
   const [thumbs, setThumbs] = useState(null); // { cues, spriteUri, spriteW, spriteH }
+  const [ended, setEnded] = useState(false);  // vídeo terminado -> pantalla final
+  const [nextItem, setNextItem] = useState(null); // "a continuación"
 
   const startAt = useRef(0);
   const seeked = useRef(false);   // ya se aplicó el salto de reanudación
@@ -90,19 +95,34 @@ export default function PlayerScreen({ route, navigation }) {
   const trackX = useRef(0); // posición absoluta (en ventana) del borde izq. del track
 
   // --- Mostrar/ocultar controles (todo junto) -------------------------------
-  const clearHide = () => clearTimeout(hideTimer.current);
-  const scheduleHide = () => {
-    clearHide();
-    // Sólo se ocultan si el video está reproduciéndose (en pausa se quedan).
-    hideTimer.current = setTimeout(() => {
-      if (playerRef.current?.playing) setShowControls(false);
-    }, IS_TV ? 5000 : 3800);
-  };
-  const revealControls = () => { setShowControls(true); scheduleHide(); };
+  //
+  //  El auto-ocultado es DECLARATIVO a propósito. La versión anterior armaba el
+  //  temporizador a mano y comprobaba `player.playing` al dispararse: al montar,
+  //  `source` aún es null (la pantalla hace return temprano), así que 5 s después
+  //  el vídeo seguía sin reproducirse, no ocultaba nada y NO se re-armaba. En
+  //  móvil se corregía solo al tocar la pantalla; en TV, donde nadie toca nada,
+  //  los controles se quedaban fijos para siempre.
+  //
+  //  Ahora el efecto depende de `playing`, así que en cuanto arranca la
+  //  reproducción el temporizador se arma solo. `interaction` es un contador que
+  //  se incrementa con cada acción del usuario para reiniciar la cuenta.
+  const [interaction, setInteraction] = useState(0);
+  const revealControls = useCallback(() => {
+    setShowControls(true);
+    setInteraction((n) => n + 1);
+  }, []);
   const toggleControls = () => {
-    if (showControls) { clearHide(); setShowControls(false); }
+    if (showControls) setShowControls(false);
     else revealControls();
   };
+
+  useEffect(() => {
+    // En pausa, mientras se arrastra la barra o en la pantalla final, los
+    // controles se quedan visibles.
+    if (!showControls || !playing || scrub != null || ended) return;
+    hideTimer.current = setTimeout(() => setShowControls(false), IS_TV ? 5000 : 3800);
+    return () => clearTimeout(hideTimer.current);
+  }, [showControls, playing, scrub, ended, interaction]);
 
   // --- Resolver la fuente y el punto de reanudación -------------------------
   useEffect(() => {
@@ -120,6 +140,43 @@ export default function PlayerScreen({ route, navigation }) {
         const videoPath = ep ? ep.video_path : media.video_path;
         src = { uri: streamUrl(videoPath), headers: authHeaders() };
         if (!cancelled) setThumbsPath(ep ? ep.thumbnails : media.thumbnails);
+
+        // --- "A continuación" (misma regla que la web) ----------------------
+        //  1) Si es un capítulo y hay otro después en la serie, ese.
+        //  2) Si no, el primer título afín.
+        let next = null;
+        if (episodeId) {
+          const all = (media.seasons || []).flatMap((s) => s.episodes);
+          const idx = all.findIndex((e) => e.id === episodeId);
+          const nx = all[idx + 1];
+          if (nx) {
+            next = {
+              subtitle: `SIGUIENTE · T${nx.season_number}:E${nx.episode_number}`,
+              title: nx.title || `Capítulo ${nx.episode_number}`,
+              meta: media.title,
+              banner_url: media.banner_url,
+              poster_url: media.poster_url,
+              params: { mediaId: media.id, episodeId: nx.id },
+            };
+          }
+        }
+        if (!next) {
+          const similar = await fetchSimilar(mediaId).catch(() => []);
+          // Solo autoreproducimos PELÍCULAS: una serie no se puede lanzar sin
+          // elegir capítulo, así que en ese caso no ofrecemos "a continuación".
+          const rec = (similar || []).find((s) => s.type === 'movie');
+          if (rec) {
+            next = {
+              subtitle: 'A CONTINUACIÓN',
+              title: rec.title,
+              meta: [rec.release_year, rec.genres?.join(' · ')].filter(Boolean).join('  ·  '),
+              banner_url: rec.banner_url,
+              poster_url: rec.poster_url,
+              params: { mediaId: rec.id },
+            };
+          }
+        }
+        if (!cancelled) setNextItem(next);
       }
 
       // Reanudar desde el MAYOR entre el progreso del servidor y el local
@@ -164,19 +221,23 @@ export default function PlayerScreen({ route, navigation }) {
   });
   playerRef.current = player;
 
-  // Arranca con los controles visibles y programa su auto-ocultado.
+  // Arranca con los controles visibles; el efecto de auto-ocultado se encarga
+  // de esconderlos en cuanto la reproducción empiece de verdad.
   useEffect(() => {
     revealControls();
-    return clearHide;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [revealControls]);
 
   // Modo inmersivo Android: oculta la barra de navegación inferior (se puede
   // recuperar deslizando desde el borde). Se restaura al salir del reproductor.
+  //
+  //  - En TV no hay barra de navegación que ocultar, así que nos la saltamos.
+  //  - setBehaviorAsync('overlay-swipe') describe un gesto TÁCTIL y desde que
+  //    edge-to-edge está activo (por defecto en SDK 54) Android lo ignora y
+  //    emite un warning. En TV ese warning es especialmente molesto porque el
+  //    aviso de LogBox no se puede cerrar con el mando.
   useEffect(() => {
-    if (Platform.OS !== 'android') return;
+    if (Platform.OS !== 'android' || IS_TV) return;
     NavigationBar.setVisibilityAsync('hidden').catch(() => {});
-    NavigationBar.setBehaviorAsync('overlay-swipe').catch(() => {});
     return () => {
       NavigationBar.setVisibilityAsync('visible').catch(() => {});
     };
@@ -204,6 +265,15 @@ export default function PlayerScreen({ route, navigation }) {
         if (scrub == null) setPos(cur);
         setPlaying(!!player.playing);
         setBuffering(player.status === 'loading');
+
+        // --- Fin del vídeo -> pantalla final -------------------------------
+        //  Se detecta por posición y no por un evento de expo-video porque el
+        //  margen es necesario igualmente: muchos ficheros terminan una fracción
+        //  de segundo antes de la duración declarada y el evento no llega.
+        if (d > 0 && cur > 0 && cur >= d - 0.6) {
+          setEnded(true);
+          try { player.pause(); } catch { /* noop */ }
+        }
       } catch { /* noop */ }
     }, 250);
     return () => clearInterval(id);
@@ -240,6 +310,23 @@ export default function PlayerScreen({ route, navigation }) {
     const t = p?.currentTime || 0;
     if (t > 0) { saveProgress(mediaId, episodeId, t); saveLocalProgress(mediaId, episodeId, t); }
     navigation.goBack();
+  };
+
+  // --- Acciones de la pantalla final ----------------------------------------
+  //  Al terminar guardamos el progreso completo para que el título deje de salir
+  //  en "Continuar viendo" y pase a contar como visto.
+  const replay = () => {
+    const p = playerRef.current; if (!p) return;
+    setEnded(false);
+    p.currentTime = 0;
+    p.play();
+    revealControls();
+  };
+  const playNext = () => {
+    if (!nextItem) return goBack();
+    // replace (no push): así el botón atrás vuelve a la ficha de origen y no
+    // encadena todos los vídeos reproducidos automáticamente.
+    navigation.replace('Player', nextItem.params);
   };
 
   // --- Control remoto (Android TV): D-pad ±10s, centro play/pausa -----------
@@ -293,16 +380,17 @@ export default function PlayerScreen({ route, navigation }) {
       onMoveShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponderCapture: () => true,
       onPanResponderTerminationRequest: () => false,
-      onPanResponderGrant: (e, g) => { clearHide(); measureTrack(); setScrub(ratioFromX(g.x0)); },
+      // Mientras `scrub` no sea null el efecto de auto-ocultado no arma el
+      // temporizador, así que los controles se mantienen durante el arrastre.
+      onPanResponderGrant: (e, g) => { measureTrack(); setScrub(ratioFromX(g.x0)); },
       onPanResponderMove: (e, g) => { setScrub(ratioFromX(g.moveX)); },
       onPanResponderRelease: (e, g) => {
         const r = ratioFromX(g.moveX);
         const p = playerRef.current;
         if (p && durRef.current) { p.currentTime = r * durRef.current; setPos(r * durRef.current); }
         setScrub(null);
-        scheduleHide();
       },
-      onPanResponderTerminate: () => { setScrub(null); scheduleHide(); },
+      onPanResponderTerminate: () => { setScrub(null); },
     }),
   ).current;
 
@@ -355,12 +443,14 @@ export default function PlayerScreen({ route, navigation }) {
       {/* Ancla a pantalla completa. En móvil: toca para mostrar/ocultar y OK.
           En TV: ES el elemento enfocable que retiene el foco para que el D-pad
           genere eventos (izq/der = ±10s vía TVEventHandler) y OK = play/pausa. */}
+      {/* Con la pantalla final visible el ancla deja de ser enfocable: si no,
+          retendría el foco y los botones del final serían inalcanzables. */}
       <Pressable
         style={StyleSheet.absoluteFill}
         onPress={onCenterPress}
-        focusable={IS_TV}
-        isTVSelectable={IS_TV}
-        hasTVPreferredFocus={IS_TV}
+        focusable={IS_TV && !ended}
+        isTVSelectable={IS_TV && !ended}
+        hasTVPreferredFocus={IS_TV && !ended}
       />
 
       {/* Spinner de carga (siempre visible durante el buffering) */}
@@ -370,7 +460,7 @@ export default function PlayerScreen({ route, navigation }) {
         </View>
       )}
 
-      {showControls && (
+      {showControls && !ended && (
         <>
           {/* Oscurecido para dar contraste a los controles */}
           <View style={styles.scrim} pointerEvents="none" />
@@ -439,6 +529,15 @@ export default function PlayerScreen({ route, navigation }) {
             <Text style={styles.time}>{fmt(dur)}</Text>
           </View>
         </>
+      )}
+
+      {ended && (
+        <EndOverlay
+          nextItem={nextItem}
+          onPlayNext={playNext}
+          onReplay={replay}
+          onBack={goBack}
+        />
       )}
     </View>
   );

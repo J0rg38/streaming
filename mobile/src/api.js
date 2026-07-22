@@ -33,7 +33,13 @@ export const me = () => apiFetch('/api/auth/me');
 export const fetchCatalog = () => apiFetch('/api/media');
 export const fetchAdultCatalog = () => apiFetch('/api/media/adult');
 export const fetchMedia = (id) => apiFetch(`/api/media/${id}`);
-export const searchMedia = (q) => apiFetch(`/api/media/search?q=${encodeURIComponent(q)}`);
+// El buscador es el mismo endpoint para catálogo normal y +18; el flag decide
+// en cuál busca (el backend exige acceso concedido para adult=true).
+export const searchMedia = (q, adult = false) =>
+  apiFetch(`/api/media/search?q=${encodeURIComponent(q)}${adult ? '&adult=true' : ''}`);
+// Títulos afines (comparten género). Alimenta el carrusel "Más como esto" de la
+// ficha y el "A continuación" del final del reproductor.
+export const fetchSimilar = (id) => apiFetch(`/api/media/${id}/similar`);
 
 // --- Progreso ---
 export const fetchProgress = (mediaId, episodeId) =>

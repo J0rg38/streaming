@@ -229,41 +229,62 @@ router.get('/search', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-//  GET /api/media/:id/similar — títulos que comparten al menos un género.
+//  GET /api/media/:id/similar — títulos afines, por AFINIDAD PONDERADA.
+//
+//  No basta con "comparte algún género": casi todo comparte "Drama" y el
+//  resultado sale plano. Puntuamos cuántos valores comparte de cada campo:
+//    - actores: peso 4  (compartir reparto es la señal más fuerte de afinidad)
+//    - géneros: peso 3
+//    - etiquetas: peso 2 (son libres, así que valen menos que un género)
+//  Se ordena por puntuación y, a igualdad, por lo más reciente.
+//
+//  Alimenta el carrusel "Más como esto" de la ficha y el "A continuación" del
+//  final del reproductor, tanto en web como en la app de TV.
 //  (Se define antes que /:id para evitar ambigüedad de rutas.)
 // ---------------------------------------------------------------------------
 router.get('/:id/similar', async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'id inválido' });
 
+  const COLS = `id, title, type, poster_url, banner_url, duration, genres, release_year`;
+
   try {
-    const { rows: base } = await query(`SELECT genres, is_adult FROM media WHERE id = $1`, [id]);
+    const { rows: base } = await query(
+      `SELECT genres, actors, tags, is_adult FROM media WHERE id = $1`,
+      [id]
+    );
     if (base.length === 0) return res.status(404).json({ error: 'No encontrado' });
 
-    const genres = base[0].genres || [];
-    const adult = base[0].is_adult; // los similares comparten la naturaleza (normal/adulto)
+    const { genres = [], actors = [], tags = [], is_adult: adult } = base[0];
 
-    // Buscamos otros títulos que compartan algún género (operador && de arrays).
-    // Si el título no tiene géneros, devolvemos los más recientes como fallback.
-    const { rows } = genres.length
-      ? await query(
-          `SELECT id, title, type, poster_url, banner_url, duration, genres, release_year
-             FROM media
-            WHERE id <> $1 AND is_adult = $3 AND genres && $2::text[]
-            ORDER BY created_at DESC
-            LIMIT 12`,
-          [id, genres, adult]
-        )
-      : await query(
-          `SELECT id, title, type, poster_url, banner_url, duration, genres, release_year
-             FROM media
-            WHERE id <> $1 AND is_adult = $2
-            ORDER BY created_at DESC
-            LIMIT 12`,
-          [id, adult]
-        );
+    // Cuenta de valores en común por campo (intersección de arrays).
+    const { rows } = await query(
+      `SELECT ${COLS},
+              cardinality(ARRAY(SELECT unnest(actors) INTERSECT SELECT unnest($3::text[]))) * 4
+            + cardinality(ARRAY(SELECT unnest(genres) INTERSECT SELECT unnest($2::text[]))) * 3
+            + cardinality(ARRAY(SELECT unnest(tags)   INTERSECT SELECT unnest($4::text[]))) * 2
+              AS score
+         FROM media
+        WHERE id <> $1
+          AND is_adult = $5
+          AND coming_soon = false      -- lo que aún no se puede ver no se recomienda
+        ORDER BY score DESC, created_at DESC
+        LIMIT 12`,
+      [id, genres, actors, tags, adult]
+    );
 
-    res.json(rows);
+    // Solo devolvemos los que tienen algo en común de verdad.
+    const scored = rows.filter((r) => Number(r.score) > 0);
+    if (scored.length > 0) return res.json(scored);
+
+    // Sin nada en común (p.ej. título sin metadatos): los más recientes.
+    const { rows: recent } = await query(
+      `SELECT ${COLS} FROM media
+        WHERE id <> $1 AND is_adult = $2 AND coming_soon = false
+        ORDER BY created_at DESC LIMIT 12`,
+      [id, adult]
+    );
+    res.json(recent);
   } catch (err) {
     console.error('[GET /api/media/:id/similar]', err);
     res.status(500).json({ error: 'Error al buscar similares' });

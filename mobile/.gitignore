@@ -3,3 +3,9 @@ node_modules/
 dist/
 *.log
 .DS_Store
+
+# Carpetas nativas generadas por `expo prebuild` (CNG). NO van a git: se
+# regeneran con `npx expo prebuild --clean`. Ojo: el prebuild de TV (EXPO_TV=1)
+# y el de móvil producen manifests distintos, por eso conviene no versionarlas.
+/android
+/ios
