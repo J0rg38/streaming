@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 import { useState } from 'react';
 import {
-  View, Text, TextInput, ActivityIndicator,
+  View, Text, TextInput, ActivityIndicator, ScrollView,
   KeyboardAvoidingView, Platform, StyleSheet,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -32,10 +32,22 @@ export default function LoginScreen() {
       <StatusBar style="light" />
       <AuthBackground />
 
+      {/* El teclado tapaba la contraseña y el botón "Entrar": en Android el
+          `behavior` de KeyboardAvoidingView no aplica, y con edge-to-edge (por
+          defecto desde el SDK 54) el `adjustResize` del manifiesto ya no encoge
+          la ventana como antes. La solución robusta es un ScrollView: si el
+          teclado tapa algo, se puede desplazar hasta el botón.
+          keyboardShouldPersistTaps="handled" permite pulsar "Entrar" con el
+          teclado abierto, sin necesidad de cerrarlo primero. */}
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.centerer}
+        style={{ flex: 1 }}
       >
+        <ScrollView
+          contentContainerStyle={styles.centerer}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
         <View style={styles.card}>
           <View style={styles.header}>
             <Logo height={54} />
@@ -73,6 +85,7 @@ export default function LoginScreen() {
               : (<><LogInIcon size={18} /><Text style={styles.buttonText}>Entrar</Text></>)}
           </Focusable>
         </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </View>
   );
@@ -80,7 +93,9 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0d0d0f' },
-  centerer: { flex: 1, justifyContent: 'center', paddingHorizontal: 22 },
+  // flexGrow (no flex) para que el contenido siga centrado cuando cabe, pero
+  // pueda crecer y desplazarse cuando el teclado reduce el espacio disponible.
+  centerer: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 22, paddingVertical: 24 },
 
   card: {
     borderRadius: 22,

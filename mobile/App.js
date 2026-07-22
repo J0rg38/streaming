@@ -26,6 +26,7 @@ import DownloadsScreen from './src/screens/DownloadsScreen';
 import TvCatalogScreen from './src/tv/screens/TvCatalogScreen';
 import TvDetailScreen from './src/tv/screens/TvDetailScreen';
 import TvSearchScreen from './src/tv/screens/TvSearchScreen';
+import TvLoginScreen from './src/tv/screens/TvLoginScreen';
 
 const IS_TV = Platform.isTV === true;
 
@@ -91,7 +92,11 @@ function Routes() {
   if (!user) {
     return (
       <Stack.Navigator>
-        <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+        <Stack.Screen
+          name="Login"
+          component={IS_TV ? TvLoginScreen : LoginScreen}
+          options={{ headerShown: false }}
+        />
       </Stack.Navigator>
     );
   }

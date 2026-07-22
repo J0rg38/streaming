@@ -1,7 +1,7 @@
 // ----------------------------------------------------------------------------
 //  Icons — iconos SVG genéricos (trazos de lucide) para formularios y descargas.
 // ----------------------------------------------------------------------------
-import Svg, { Rect, Path, Polyline, Line } from 'react-native-svg';
+import Svg, { Rect, Path, Polyline, Line, Circle } from 'react-native-svg';
 
 const base = (size, color, sw) => ({
   width: size, height: size, viewBox: '0 0 24 24',
@@ -80,6 +80,27 @@ export function DownloadCloudIcon({ size = 22, color = '#fff', strokeWidth = 2 }
       <Path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
       <Polyline points="8 17 12 21 16 17" />
       <Line x1="12" y1="12" x2="12" y2="21" />
+    </Svg>
+  );
+}
+
+// Lupa y "salir". Viven aquí (y no en tv/TvIcons) porque las usan las dos
+// interfaces: la barra lateral de TV y las cabeceras/pie del móvil.
+export function SearchIcon({ size = 22, color = '#fff', strokeWidth = 2 }) {
+  return (
+    <Svg {...base(size, color, strokeWidth)}>
+      <Circle cx="11" cy="11" r="8" />
+      <Line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </Svg>
+  );
+}
+
+export function LogOutIcon({ size = 22, color = '#fff', strokeWidth = 2 }) {
+  return (
+    <Svg {...base(size, color, strokeWidth)}>
+      <Path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <Polyline points="16 17 21 12 16 7" />
+      <Line x1="21" y1="12" x2="9" y2="12" />
     </Svg>
   );
 }

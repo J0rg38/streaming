@@ -87,7 +87,13 @@ export default function TvSearchScreen({ route, navigation }) {
     <TvFrame navigation={navigation} activeKey="search" adult={adult}>
       {({ contentRef }) => (
         <View style={styles.root}>
-          <TVFocusGuideView ref={contentRef} autoFocus trapFocusUp style={{ flex: 1 }}>
+          {/* SIN autoFocus en este guía: envuelve al campo Y a la rejilla, así que
+              cada vez que llegaban resultados sus hijos cambiaban, el guía volvía a
+              reclamar el foco y se lo robaba al teclado en pantalla. Ese era el
+              bug de "escribo una letra y el teclado se desactiva". El foco inicial
+              lo da hasTVPreferredFocus del campo, y la rejilla tiene su propio
+              guía más abajo. */}
+          <TVFocusGuideView ref={contentRef} trapFocusUp style={{ flex: 1 }}>
             {/* --- Campo de búsqueda --- */}
             <View style={styles.searchRow}>
               {/* En TV el foco lo recibe el envoltorio, no el TextInput: pulsar
@@ -96,6 +102,7 @@ export default function TvSearchScreen({ route, navigation }) {
                   mando (se vería enfocado pero no se podría escribir). */}
               <TvFocusable
                 onPress={() => inputRef.current?.focus()}
+                hasTVPreferredFocus
                 style={styles.fieldWrap}
                 focusStyle={styles.fieldWrapFocused}
                 scale={1}
@@ -112,6 +119,10 @@ export default function TvSearchScreen({ route, navigation }) {
                       style={styles.input}
                       returnKeyType="search"
                       autoCorrect={false}
+                      // Abre el teclado del televisor nada más entrar: quien va
+                      // al buscador va a escribir, y obligarle a pulsar OK antes
+                      // es un paso de más con el mando.
+                      autoFocus
                     />
                   </View>
                 )}
@@ -126,23 +137,33 @@ export default function TvSearchScreen({ route, navigation }) {
               </Text>
             )}
 
-            {/* --- Resultados --- */}
+            {/* --- Resultados ---
+                Guía propio con autoFocus: al BAJAR desde el campo el foco entra
+                en la primera carátula, y al volver recuerda cuál estaba. Está
+                aislado del campo justamente para que repoblarlo no le quite el
+                foco al teclado mientras se escribe. */}
             {searched && results.length === 0 && !loading ? (
               <View style={styles.empty}>
                 <Text style={styles.emptyTitle}>Sin resultados para «{q.trim()}»</Text>
                 <Text style={styles.emptyText}>Prueba con otro título, un género o el nombre de un actor.</Text>
               </View>
             ) : (
-              <FlatList
-                data={results}
-                keyExtractor={(m) => String(m.id)}
-                numColumns={COLUMNS}
-                renderItem={renderCard}
-                showsVerticalScrollIndicator={false}
-                removeClippedSubviews={false}
-                contentContainerStyle={styles.grid}
-                columnWrapperStyle={{ gap: posterTokens.gap }}
-              />
+              <TVFocusGuideView autoFocus style={{ flex: 1 }}>
+                <FlatList
+                  data={results}
+                  keyExtractor={(m) => String(m.id)}
+                  numColumns={COLUMNS}
+                  renderItem={renderCard}
+                  showsVerticalScrollIndicator={false}
+                  removeClippedSubviews={false}
+                  // El teclado del televisor tapa parte de la rejilla; sin esto,
+                  // tocar/enfocar un resultado con el teclado abierto lo cerraría
+                  // antes de registrar la pulsación.
+                  keyboardShouldPersistTaps="always"
+                  contentContainerStyle={styles.grid}
+                  columnWrapperStyle={{ gap: posterTokens.gap }}
+                />
+              </TVFocusGuideView>
             )}
           </TVFocusGuideView>
         </View>

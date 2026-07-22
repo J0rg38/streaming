@@ -9,3 +9,11 @@ dist/
 # y el de móvil producen manifests distintos, por eso conviene no versionarlas.
 /android
 /ios
+
+# Claves de firma de los APK. Secreto: si se filtra, cualquiera puede publicar
+# actualizaciones que Android acepte como legítimas. Ver credentials/LEEME.md.
+/credentials/*.keystore
+/credentials/.keystore-password
+
+# APK compilados en local
+/build-output

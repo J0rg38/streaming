@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, Image, TouchableOpacity, Pressable, ActivityIndicator,
-  PanResponder, Platform, useTVEventHandler, StyleSheet,
+  PanResponder, Platform, useTVEventHandler, StyleSheet, BackHandler,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -329,15 +329,86 @@ export default function PlayerScreen({ route, navigation }) {
     navigation.replace('Player', nextItem.params);
   };
 
+  // --- Tecla ATRÁS: primero oculta los controles, luego sale -----------------
+  //  Comportamiento esperado en un reproductor de TV (y el de Netflix/Prime):
+  //  si los controles están visibles, ATRÁS los esconde; solo si ya están
+  //  ocultos, ATRÁS abandona el reproductor. Antes salía siempre, así que quien
+  //  usaba ATRÁS para quitar los controles de en medio acababa en la ficha.
+  //
+  //  Devolver true consume el evento; false deja que react-navigation navegue.
+  useEffect(() => {
+    const onBack = () => {
+      // Con la pantalla final visible, ATRÁS sale directamente: ahí los
+      // "controles" son los botones del final y esconderlos no tendría sentido.
+      if (showControls && !ended) {
+        setShowControls(false);
+        return true;
+      }
+      return false;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+    return () => sub.remove();
+  }, [showControls, ended]);
+
+  // --- Avance continuo manteniendo pulsado el D-pad (Android TV) ------------
+  //
+  //  El fork emite 'longRight'/'longLeft' con eventKeyAction 0 al empezar la
+  //  pulsación larga y 1 al soltar (una sola vez cada uno, no se repite). Por
+  //  defecto el resto de eventos del D-pad SOLO se despachan al soltar la tecla,
+  //  que es por lo que mantener pulsado no hacía nada más allá del primer salto.
+  //
+  //  Mientras se mantiene, NO se toca el vídeo: se acumula una posición objetivo
+  //  y se pinta con `scrub`, el mismo estado que usa el arrastre táctil. Así se
+  //  ve la barra y las miniaturas avanzar, los controles no se ocultan, y al
+  //  soltar se hace UN único salto. Buscar de verdad en cada paso obligaría al
+  //  reproductor a rebufferizar constantemente sobre una conexión de red.
+  const holdRef = useRef(null);
+
+  const stopHold = useCallback(() => {
+    const h = holdRef.current;
+    if (!h) return;
+    clearInterval(h.timer);
+    holdRef.current = null;
+    const p = playerRef.current;
+    if (p && durRef.current) {
+      const t = Math.max(0, Math.min(durRef.current, h.target));
+      p.currentTime = t;
+      setPos(t);
+    }
+    setScrub(null);
+  }, []);
+
+  const startHold = useCallback((dir) => {
+    if (holdRef.current) return;
+    const d = durRef.current || 0;
+    const h = { target: playerRef.current?.currentTime || 0, ticks: 0, timer: null };
+    h.timer = setInterval(() => {
+      h.ticks += 1;
+      // Aceleración progresiva: empieza en 10 s por paso y sube hasta 60 s, para
+      // poder cruzar una película larga sin soltar pero sin pasarse de largo al
+      // principio, cuando normalmente se busca un ajuste fino.
+      const step = Math.min(60, 10 + h.ticks * 4);
+      h.target = Math.max(0, Math.min(d || Infinity, h.target + dir * step));
+      if (d) setScrub(h.target / d);
+    }, 200);
+    holdRef.current = h;
+    revealControls();
+  }, [revealControls]);
+
+  // Si la pantalla se desmonta con la tecla pulsada, el intervalo debe morir.
+  useEffect(() => () => { if (holdRef.current) clearInterval(holdRef.current.timer); }, []);
+
   // --- Control remoto (Android TV): D-pad ±10s, centro play/pausa -----------
   //  Las acciones se leen desde un ref para tener un handler estable (no
   //  re-suscribir en cada render) sin closures obsoletas.
   const actionsRef = useRef({});
-  actionsRef.current = { revealControls, skip, togglePlay };
+  actionsRef.current = { revealControls, skip, togglePlay, startHold, stopHold };
   const onTVEvent = useCallback((evt) => {
     if (!IS_TV || !evt) return;
     const t = evt.eventType;
     const a = actionsRef.current;
+    // eventKeyAction: 0 = tecla pulsada, 1 = tecla soltada.
+    const keyUp = Number(evt.eventKeyAction) === 1;
     switch (t) {
       case 'left':
       case 'rewind':
@@ -345,6 +416,13 @@ export default function PlayerScreen({ route, navigation }) {
       case 'right':
       case 'fastForward':
         a.revealControls(); a.skip(10); break;
+      // Mantener pulsado: avance continuo y acelerado hasta soltar.
+      case 'longLeft':
+      case 'longRewind':
+        keyUp ? a.stopHold() : a.startHold(-1); break;
+      case 'longRight':
+      case 'longFastForward':
+        keyUp ? a.stopHold() : a.startHold(1); break;
       case 'up':
       case 'down':
         a.revealControls(); break;

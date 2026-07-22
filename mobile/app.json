@@ -21,10 +21,10 @@
     ],
     "android": {
       "package": "com.mivod.app",
-      "versionCode": 3,
+      "versionCode": 4,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#141414"
+        "backgroundColor": "#000000"
       }
     },
     "plugins": [

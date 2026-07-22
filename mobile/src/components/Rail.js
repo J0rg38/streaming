@@ -1,10 +1,17 @@
 // ----------------------------------------------------------------------------
 //  Rail.js — Carrusel horizontal de portadas (reutilizable).
+//
+//  El resalte de foco (resplandor + zoom) es SOLO para televisor: sirve para
+//  saber dónde está el cursor del D-pad. En un móvil táctil no hay cursor, y la
+//  vista conserva el foco de Android al volver de la ficha, así que el póster
+//  visitado se quedaba con un halo terracota permanente que parecía un fallo.
 // ----------------------------------------------------------------------------
-import { View, Text, FlatList, Image, Pressable, StyleSheet } from 'react-native';
+import { View, Text, FlatList, Image, Pressable, StyleSheet, Platform } from 'react-native';
 import { imageSource } from '../api';
 import { useDownloads } from '../downloadsContext';
 import { DownloadCloudIcon } from './Icons';
+
+const IS_TV = Platform.isTV === true;
 
 export function Poster({ item, onPress }) {
   const { ids } = useDownloads();
@@ -12,9 +19,11 @@ export function Poster({ item, onPress }) {
   return (
     <Pressable
       onPress={() => onPress(item)}
-      style={({ focused }) => [styles.card, focused && styles.cardFocused]}
+      style={({ focused }) => [styles.card, focused && IS_TV && styles.cardFocused]}
     >
-      {({ focused }) => (
+      {({ focused: rawFocused }) => {
+        const focused = rawFocused && IS_TV;
+        return (
         <>
           <View style={styles.posterWrap}>
             {/* Resplandor terracota detrás de la carátula al enfocar */}
@@ -33,7 +42,8 @@ export function Poster({ item, onPress }) {
             </Text>
           </View>
         </>
-      )}
+        );
+      }}
     </Pressable>
   );
 }

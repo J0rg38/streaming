@@ -134,17 +134,55 @@ async function buildCatalog(userId, adult) {
       ]
     : [];
 
-  // Géneros: dedup TOTAL — cada título aparece en UN SOLO género. Para no
-  // amontonar todo en un mismo género, asignamos cada título al de sus géneros
-  // que MENOS elementos tenga hasta el momento (reparto equilibrado).
-  const byGenre = {};
-  const count = (g) => byGenre[g]?.length || 0;
-  for (const item of take(playable)) {
-    const genres = item.genres?.length ? item.genres : ['Otros'];
-    const g = genres.reduce((best, cur) => (count(cur) < count(best) ? cur : best), genres[0]);
-    (byGenre[g] ||= []).push(item);
+  // --- Géneros: filas POCAS y LLENAS, sin duplicados -------------------------
+  //
+  //  La versión anterior repartía "equilibradamente": mandaba cada título al
+  //  género que MENOS elementos tuviera. El efecto era el contrario al buscado —
+  //  garantizaba esparcir los títulos y producía un carrusel por género con UNA
+  //  sola película (Drama 1, Romance 1, Suspenso 1...), que se ve roto.
+  //
+  //  Ahora se hace al revés, de forma codiciosa: en cada vuelta se elige el
+  //  género con MÁS títulos disponibles y se le asigna todo lo que encaje. Una
+  //  fila solo se crea si alcanza un mínimo digno; los títulos que no llegan a
+  //  formar fila propia se agrupan en una sola al final, en vez de generar
+  //  docenas de carruseles de un elemento. Cada título sigue apareciendo una
+  //  única vez en toda la página.
+  const MIN_RAIL = 4;   // por debajo de esto un carrusel se ve vacío
+  const MAX_RAIL = 24;  // más allá, nadie recorre la fila entera
+
+  const pending = take(playable);
+  const genresOf = (m) => (m.genres?.length ? m.genres : ['Otros']);
+  const assigned = new Set();
+  const usedGenres = new Set();  // un género da como mucho UNA fila
+  const rails = [];
+
+  for (;;) {
+    // Frecuencia de cada género contando SOLO lo que aún no tiene fila, y
+    // descartando los géneros que ya tienen la suya (si no, un género con más
+    // de MAX_RAIL títulos generaría dos carruseles con el mismo nombre).
+    const freq = new Map();
+    for (const m of pending) {
+      if (assigned.has(m.id)) continue;
+      for (const g of genresOf(m)) {
+        if (!usedGenres.has(g)) freq.set(g, (freq.get(g) || 0) + 1);
+      }
+    }
+    if (freq.size === 0) break;
+
+    const [best] = [...freq.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+    const items = pending
+      .filter((m) => !assigned.has(m.id) && genresOf(m).includes(best))
+      .slice(0, MAX_RAIL);
+
+    usedGenres.add(best);
+    if (items.length < MIN_RAIL) continue;  // este género no llena fila; probamos el siguiente
+    items.forEach((m) => assigned.add(m.id));
+    rails.push({ genre: best, items });
   }
-  const rails = Object.entries(byGenre).map(([genre, items]) => ({ genre, items }));
+
+  const leftovers = pending.filter((m) => !assigned.has(m.id));
+  if (leftovers.length) rails.push({ genre: 'Más títulos', items: leftovers });
 
   return { continueWatching, featured, recentlyAdded, comingSoon, discovery, rails, all: playable };
 }

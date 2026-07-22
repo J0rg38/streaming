@@ -5,7 +5,12 @@
 //  terracota y un leve zoom. En móvil no hay foco, así que se comporta como un
 //  botón normal (sin cambios visuales).
 // ----------------------------------------------------------------------------
-import { Pressable, StyleSheet } from 'react-native';
+import { Pressable, StyleSheet, Platform } from 'react-native';
+
+// El resalte de foco solo tiene sentido con mando: indica dónde está el cursor
+// del D-pad. En móvil la vista conserva el foco de Android tras volver de otra
+// pantalla, y el botón se quedaba con un borde terracota permanente.
+const IS_TV = Platform.isTV === true;
 
 export default function Focusable({
   children, onPress, style, focusStyle, focusScale = 1.06, ring = true, ...rest
@@ -13,13 +18,16 @@ export default function Focusable({
   return (
     <Pressable
       onPress={onPress}
-      style={({ focused, pressed }) => [
-        style,
-        focused && ring && styles.ring,
-        focused && focusStyle,
-        focused && { transform: [{ scale: focusScale }] },
-        pressed && styles.pressed,
-      ]}
+      style={({ focused: rawFocused, pressed }) => {
+        const focused = rawFocused && IS_TV;
+        return [
+          style,
+          focused && ring && styles.ring,
+          focused && focusStyle,
+          focused && { transform: [{ scale: focusScale }] },
+          pressed && styles.pressed,
+        ];
+      }}
       {...rest}
     >
       {children}

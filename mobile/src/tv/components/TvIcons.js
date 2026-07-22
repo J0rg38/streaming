@@ -18,24 +18,11 @@ export function HomeIcon({ size = 22, color = '#fff', strokeWidth = 2 }) {
   );
 }
 
-export function SearchIcon({ size = 22, color = '#fff', strokeWidth = 2 }) {
-  return (
-    <Svg {...base(size, color, strokeWidth)}>
-      <Circle cx="11" cy="11" r="8" />
-      <Line x1="21" y1="21" x2="16.65" y2="16.65" />
-    </Svg>
-  );
-}
+// La lupa y el icono de salir los comparten móvil y TV, así que viven en
+// components/Icons.js; se reexportan aquí para que las pantallas de TV sigan
+// importando todos sus iconos de un solo sitio.
+export { SearchIcon, LogOutIcon } from '../../components/Icons';
 
-export function LogOutIcon({ size = 22, color = '#fff', strokeWidth = 2 }) {
-  return (
-    <Svg {...base(size, color, strokeWidth)}>
-      <Path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-      <Polyline points="16 17 21 12 16 7" />
-      <Line x1="21" y1="12" x2="9" y2="12" />
-    </Svg>
-  );
-}
 
 export function AdultIcon({ size = 22, color = '#fff', strokeWidth = 2 }) {
   return (
