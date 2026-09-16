@@ -8,6 +8,7 @@
 import { Router } from 'express';
 import { query } from '../db.js';
 import { canAccessAdult } from '../middleware/auth.js';
+import { creditsAtFor } from '../marks.js';
 
 const router = Router();
 
@@ -63,10 +64,26 @@ function buildLensRails(enriched, seen, field, prefix, maxRails) {
   return rails;
 }
 
+// ¿Este título está TERMINADO para el usuario? Dos caminos:
+//   - pasó del 95% (regla de siempre, para lo que no tiene marca de créditos);
+//   - o llegó al inicio de los créditos, que es donde termina la historia.
+// Sin duración conocida no se puede afirmar nada, así que sigue en "Continuar
+// viendo" (es lo que hacía antes y evita que un título desaparezca sin motivo).
+function isWatched(p, item) {
+  const dur = Number(p.duration) || 0;
+  if (!dur) return false;
+  if (p.stopped_at >= dur * 0.95) return true;
+  const creditsAt = p.episode_id
+    ? creditsAtFor({ credits_start: p.ep_credits_start, duration: dur, kind: 'episode' })
+    : creditsAtFor({ credits_start: item.credits_start, duration: dur, kind: 'movie' });
+  return creditsAt != null && p.stopped_at >= creditsAt;
+}
+
 async function buildCatalog(userId, adult) {
   const { rows: media } = await query(
     `SELECT id, title, description, type, release_year, release_date, coming_soon,
-            genres, actors, tags, poster_url, banner_url, video_path, duration, featured
+            genres, actors, tags, poster_url, banner_url, video_path, duration, featured,
+            credits_start
        FROM media
       WHERE is_adult = $1
       ORDER BY created_at DESC`,
@@ -76,6 +93,7 @@ async function buildCatalog(userId, adult) {
   const { rows: progressRows } = await query(
     `SELECT wp.media_id, wp.episode_id, wp.stopped_at, wp.updated_at,
             COALESCE(e.duration, m.duration) AS duration,
+            e.credits_start AS ep_credits_start,
             e.season_number, e.episode_number
        FROM watch_progress wp
        JOIN media m ON m.id = wp.media_id
@@ -101,7 +119,7 @@ async function buildCatalog(userId, adult) {
             : null,
         })
       : null;
-    return { ...item, progress };
+    return { ...item, progress, watched: p ? isWatched(p, item) : false };
   });
 
   // "Próximamente": títulos sin video todavía (próximos estrenos). Van en su
@@ -118,7 +136,7 @@ async function buildCatalog(userId, adult) {
 
   const continueWatching = mark(
     playable
-      .filter((m) => m.progress && (m.progress.percent === null || m.progress.percent < 95))
+      .filter((m) => m.progress && !m.watched)
       .slice(0, 20)
   );
   // Destacados PRIMERO (prioridad sobre recientes): un estelar siempre sale aquí.
@@ -341,7 +359,7 @@ router.get('/:id', async (req, res) => {
     const { rows } = await query(
       `SELECT id, title, description, type, release_year, release_date, coming_soon,
               genres, actors, poster_url, banner_url, video_path, duration,
-              transcode_status, hls_master, is_adult
+              transcode_status, hls_master, is_adult, credits_start, marks_source
          FROM media WHERE id = $1`,
       [id]
     );
@@ -369,13 +387,34 @@ router.get('/:id', async (req, res) => {
         duration: media.duration,
         episode: null,
       });
-      return res.json({ ...media, thumbnails: thumbsFromMaster(media.hls_master), progress });
+      // "Visto" lo decide el servidor (95% O inicio de créditos), para que la
+      // ficha y el catálogo digan siempre lo mismo.
+      if (progress) {
+        progress.watched = isWatched(
+          { stopped_at: progress.stopped_at, duration: media.duration, episode_id: null },
+          media
+        );
+      }
+      // credits_at: punto EFECTIVO donde empiezan los créditos (marca guardada
+      // o estimación por duración). El reproductor no necesita saber de dónde
+      // salió; `marks_source` va aparte para que el admin pueda distinguirlo.
+      return res.json({
+        ...media,
+        thumbnails: thumbsFromMaster(media.hls_master),
+        progress,
+        credits_at: creditsAtFor({
+          credits_start: media.credits_start,
+          duration: media.duration,
+          kind: 'movie',
+        }),
+      });
     }
 
     // --- Serie: capítulos ordenados, cada uno con el progreso del usuario --
     const { rows: episodes } = await query(
       `SELECT e.id, e.season_number, e.episode_number, e.title,
               e.duration, e.video_path, e.transcode_status, e.hls_master,
+              e.credits_start, e.intro_start, e.intro_end, e.marks_source,
               wp.stopped_at
          FROM episodes e
          LEFT JOIN watch_progress wp
@@ -393,7 +432,18 @@ router.get('/:id', async (req, res) => {
         duration: ep.duration,
         episode: null,
       });
+      if (ep.progress) {
+        ep.progress.watched = isWatched(
+          { stopped_at: ep.progress.stopped_at, duration: ep.duration, episode_id: ep.id, ep_credits_start: ep.credits_start },
+          media
+        );
+      }
       ep.thumbnails = thumbsFromMaster(ep.hls_master);
+      ep.credits_at = creditsAtFor({
+        credits_start: ep.credits_start,
+        duration: ep.duration,
+        kind: 'episode',
+      });
       if (!seasonMap.has(ep.season_number)) seasonMap.set(ep.season_number, []);
       seasonMap.get(ep.season_number).push(ep);
     }

@@ -41,9 +41,11 @@ export function progressLabel(progress, fallbackDuration = null) {
   if (!progress) {
     return fallbackDuration ? formatMinutes(fallbackDuration) : '';
   }
-  const { percent, remaining, stopped_at, duration } = progress;
+  const { percent, remaining, stopped_at, duration, watched } = progress;
 
-  if (percent !== null && percent >= 95) return 'Visto';
+  // `watched` lo calcula el backend (95% O inicio de los créditos); el 95% de
+  // aquí es sólo el respaldo para respuestas antiguas que no lo traigan.
+  if (watched || (percent !== null && percent >= 95)) return 'Visto';
 
   if (remaining != null && remaining > 0) {
     return `Te quedan ${formatMinutes(remaining)}`;

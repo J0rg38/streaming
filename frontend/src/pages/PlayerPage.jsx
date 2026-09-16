@@ -9,7 +9,8 @@
 // ----------------------------------------------------------------------------
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { fetchMedia, fetchSimilar, streamUrl } from '../api.js';
+import { fetchMedia, fetchSimilar, streamUrl, setMovieMarks, setEpisodeMarks } from '../api.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 import VideoPlayer from '../components/VideoPlayer.jsx';
 
 export default function PlayerPage() {
@@ -26,6 +27,9 @@ export default function PlayerPage() {
   const [homePath, setHomePath] = useState('/');        // inicio según sea normal o +18
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  // Marcas: dónde empiezan los créditos y dónde acaba la cabecera del capítulo.
+  const [marks, setMarks] = useState({ creditsAt: null, introStart: null, introEnd: null });
+  const { isAdmin } = useAuth();
 
   useEffect(() => {
     setLoading(true);
@@ -45,6 +49,11 @@ export default function PlayerPage() {
           hlsMaster = ep.hls_master;
           status = ep.transcode_status;
           thumbnails = ep.thumbnails;
+          setMarks({
+            creditsAt: ep.credits_at ?? null,
+            introStart: ep.intro_start ?? null,
+            introEnd: ep.intro_end ?? null,
+          });
           setTitle(
             `${media.title} · T${ep.season_number}:E${ep.episode_number}` +
             (ep.title ? ` — ${ep.title}` : '')
@@ -69,6 +78,7 @@ export default function PlayerPage() {
           hlsMaster = media.hls_master;
           status = media.transcode_status;
           thumbnails = media.thumbnails;
+          setMarks({ creditsAt: media.credits_at ?? null, introStart: null, introEnd: null });
           setTitle(media.title);
         }
 
@@ -114,6 +124,25 @@ export default function PlayerPage() {
     );
   }
 
+  // Marcado manual (sólo administradores): guarda el segundo actual y lo aplica
+  // en caliente, sin recargar, para poder comprobarlo al momento.
+  const handleSaveMark = async (kind, secs, { applySeason } = {}) => {
+    if (epId) {
+      const body = kind === 'credits'
+        ? { credits_start: secs }
+        // De la cabecera sólo se marca el FINAL (que es lo que se salta); el
+        // principio se asume al inicio del capítulo, que es el caso normal.
+        : { intro_start: marks.introStart ?? 0, intro_end: secs, apply_season: !!applySeason };
+      await setEpisodeMarks(Number(epId), body);
+      setMarks((m) => (kind === 'credits'
+        ? { ...m, creditsAt: secs }
+        : { ...m, introStart: m.introStart ?? 0, introEnd: secs }));
+    } else {
+      await setMovieMarks(Number(mediaId), { credits_start: secs });
+      setMarks((m) => ({ ...m, creditsAt: secs }));
+    }
+  };
+
   return (
     <div className="relative h-screen w-screen bg-black">
       <VideoPlayer
@@ -127,6 +156,11 @@ export default function PlayerPage() {
         nextItem={nextItem}
         recommendations={recommendations}
         homePath={homePath}
+        creditsAt={marks.creditsAt}
+        introStart={marks.introStart}
+        introEnd={marks.introEnd}
+        canMark={isAdmin}
+        onSaveMark={handleSaveMark}
         // replace: true -> al saltar al siguiente video NO apilamos historial,
         // así el botón "Volver" siempre regresa a la página de origen (no al
         // video anterior que se reprodujo automáticamente).

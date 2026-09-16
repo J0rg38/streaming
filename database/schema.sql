@@ -52,12 +52,16 @@ CREATE TABLE media (
     transcode_status VARCHAR(12) NOT NULL DEFAULT 'pending', -- pending|processing|ready|error
     hls_master   TEXT,                            -- URL del master playlist HLS
     featured     BOOLEAN      NOT NULL DEFAULT false, -- aparece en "Estelares"
+    coming_soon  BOOLEAN      NOT NULL DEFAULT false, -- anunciada, aún sin video
+    release_date DATE,                            -- fecha de estreno (opcional)
+    credits_start INT,                            -- segundo en que empiezan los créditos
+    marks_source VARCHAR(10),                     -- manual|chapters|auto (ver migration_marks.sql)
     created_at   TIMESTAMP    NOT NULL DEFAULT NOW(),
 
-    -- Regla de integridad: una película DEBE tener video_path;
-    -- una serie NO debe tenerlo (sus videos están en episodes).
+    -- Regla de integridad: una película DEBE tener video_path (salvo que sea un
+    -- próximo estreno); una serie NO debe tenerlo (sus videos están en episodes).
     CONSTRAINT chk_video_path CHECK (
-        (type = 'movie'  AND video_path IS NOT NULL) OR
+        (type = 'movie'  AND (video_path IS NOT NULL OR coming_soon = true)) OR
         (type = 'series' AND video_path IS NULL)
     )
 );
@@ -75,9 +79,26 @@ CREATE TABLE episodes (
     video_path     TEXT NOT NULL,                  -- ruta al archivo del capítulo
     transcode_status VARCHAR(12) NOT NULL DEFAULT 'pending',
     hls_master     TEXT,
+    credits_start  INT,                             -- segundo en que empiezan los créditos
+    intro_start    INT,                             -- cabecera de la serie: inicio
+    intro_end      INT,                             -- cabecera de la serie: fin ("Saltar intro")
+    marks_source   VARCHAR(10),                     -- manual|chapters|auto
     CONSTRAINT uq_episode UNIQUE (media_id, season_number, episode_number)
 );
 CREATE INDEX idx_episodes_media ON episodes(media_id, season_number, episode_number);
+
+-- ----------------------------------------------------------------------------
+--  Índices de media. Los GIN/trigram sostienen el buscador difuso
+--  (GET /api/media/search); los parciales sólo indexan las filas que interesan.
+-- ----------------------------------------------------------------------------
+CREATE INDEX idx_media_title_trgm ON media USING gin (lower(title) gin_trgm_ops);
+CREATE INDEX idx_media_genres     ON media USING gin (genres);
+CREATE INDEX idx_media_actors     ON media USING gin (actors);
+CREATE INDEX idx_media_tags       ON media USING gin (tags);
+CREATE INDEX idx_media_is_adult   ON media(is_adult);
+CREATE INDEX idx_media_featured   ON media(featured)      WHERE featured = true;
+CREATE INDEX idx_media_sin_marcas ON media(id)            WHERE marks_source IS NULL;
+CREATE INDEX idx_episodes_sin_marcas ON episodes(id)      WHERE marks_source IS NULL;
 
 -- ----------------------------------------------------------------------------
 --  watch_progress : posición de reproducción POR USUARIO.

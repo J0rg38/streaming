@@ -26,12 +26,19 @@ cd frontend && npm install && npm run dev      # Vite :5173, proxy /api -> :4000
 cd mobile   && npm install && npx expo start -c
 
 # Base de datos desde cero
-psql -U postgres -d vod -f database/schema.sql          # ¡DESTRUCTIVO: hace DROP TABLE!
-psql -U postgres -d vod -f database/migration_XXX.sql   # luego cada migración, en orden
+psql -U postgres -d vod -f database/schema.sql   # ¡DESTRUCTIVO: hace DROP TABLE!
+#  Y NADA MÁS: schema.sql trae ya todas las columnas e índices de las migraciones.
+#  Los migration_*.sql son sólo para actualizar una BD que YA existe.
+
+# Actualizar una BD existente (pendiente de aplicar en producción)
+psql -U postgres -d vod -f database/migration_marks.sql   # marcas de créditos/cabecera
 
 # Verificación antes de dar por bueno un cambio (NO hay tests ni linter en el repo)
 cd backend  && node --check src/routes/admin.js   # sintaxis del/los archivos tocados
 cd frontend && npm run build                      # el build es la única red de seguridad del front
+#  node --check SÓLO vale para backend (ES Modules puro). El frontend es JSX y mobile es JSX
+#  dentro de .js: ahí node --check falla siempre. Mobile NO tiene comprobación estática alguna
+#  — el error sale en Metro o en el prebuild.
 
 # Despliegue en el servidor
 ./deploy.sh                # git pull + npm install + build + pm2 restart + reload nginx
@@ -154,8 +161,11 @@ respaldo mientras el HLS no existe.
 ### Catálogo: dedup TOTAL (`media.js` → `buildCatalog`)
 Cada título aparece **una sola vez en toda la página**. Un `Set seen` acumulativo se aplica en este
 orden: Continuar viendo → **Destacados** (prioridad sobre recientes) → Recién añadidos (**máx. 12**)
-→ (sólo +18) rails de descubrimiento por actriz/etiqueta (`buildLensRails`) → Géneros. En géneros
-cada título va a **un solo** género: el que menos ítems tenga hasta ese momento (reparto equilibrado).
+→ (sólo +18) rails de descubrimiento por actriz/etiqueta (`buildLensRails`) → Géneros.
+En géneros el reparto es **codicioso, no equilibrado**: en cada vuelta gana el género con MÁS títulos
+disponibles y se lleva todo lo que encaje (`MIN_RAIL = 4`, `MAX_RAIL = 24`), y lo que no llena fila
+acaba en "Más títulos". Repartir "equilibrado" fue justo el error anterior: mandar cada título al
+género con menos ítems garantizaba docenas de carruseles de UNA sola película.
 "Próximamente" (`coming_soon`) es una sección aparte y se excluye de todo lo demás.
 
 ### Contenido para adultos
@@ -174,6 +184,55 @@ Admin → pestaña "Próximamente" y se "regularizan" subiendo el video
 como fallback difuso, ordenado por `title_match DESC, score DESC`. Devuelve `hasTitleMatch` para que
 el front avise "no hay exacto, mostramos similares".
 
+### Recomendaciones: afinidad ponderada (`media.js` → `GET /api/media/:id/similar`)
+"Comparte algún género" no sirve: casi todo comparte *Drama* y la parrilla sale plana. Se puntúa la
+**intersección de arrays** en SQL (`cardinality(ARRAY(SELECT unnest(a) INTERSECT SELECT unnest(b)))`)
+con pesos **actores ×4, géneros ×3, etiquetas ×2**; orden `score DESC, created_at DESC`, límite 12.
+Se filtra al mismo bucket `is_adult` y se excluye `coming_soon` (lo que no se puede ver no se
+recomienda). Si nada puntúa >0, cae a los más recientes.
+Un solo endpoint alimenta a los tres clientes: "Más como esto" en la ficha, el "A continuación" + la
+parrilla de `EndScreen` en web, y `TvDetailScreen` en televisor.
+**Trampa de rutas:** `/:id/similar` DEBE declararse ANTES que `/:id` en `media.js`, o Express casa
+`/:id` y se pierde el sufijo.
+
+### Fin de reproducción: créditos, "visto" y post-play
+Nadie se queda a ver los créditos, así que exigir el último segundo para dar por terminada una
+película la dejaba atascada en "Continuar viendo". El punto que manda es **`credits_start`**:
+
+- **De dónde sale** (`backend/src/marks.js`): cuatro capas, gana la mejor disponible y queda anotada
+  en `marks_source` — estimación por duración (se calcula al vuelo, **no** se guarda, así afinar la
+  fórmula mejora todo el catálogo de golpe) → capítulo "End Credits" del contenedor
+  (`ffprobe -show_chapters`, `'chapters'`) → luminancia de los **fotogramas clave** del último tercio
+  con ffmpeg (`'auto'`: los créditos son un tramo largo y oscuro que llega al final) → **clic del
+  administrador en el reproductor** (`'manual'`, que ninguna detección automática pisa).
+- **Cuándo se analiza**: barrido en segundo plano al arrancar y tras cada subida
+  (`scheduleMarksScan`), de uno en uno y **sólo mientras `isTranscodeBusy()` sea false** —
+  transcodificar tiene prioridad absoluta. Un análisis sin resultado deja `marks_source='auto'` con
+  `credits_start` NULL: consta como analizado y no se repite en cada arranque.
+- **Qué hace el reproductor web** (`VideoPlayer.jsx`): al llegar a `credits_at` guarda el progreso
+  **al final** (título visto), encoge el vídeo a la esquina superior derecha y muestra `EndScreen`
+  con las recomendaciones. El vídeo **no se para**. La cuenta atrás del siguiente título arranca
+  20 s después (`autoplayDelay`, recortado si los créditos son más cortos que eso). "Seguir viendo"
+  devuelve el vídeo a pantalla completa y ya no vuelve a interrumpir.
+- El encogido se aplica a un **contenedor**, NUNCA al `<video>`: tocar el elemento le quita el
+  overlay de hardware (misma razón por la que no debe llevar `border-radius`).
+- **Series**: `intro_start`/`intro_end` alimentan el botón "Saltar intro". Se marcan a mano; el botón
+  "· y toda la temporada" copia la marca al resto de capítulos, porque la sintonía empieza siempre en
+  el mismo punto. De la cabecera sólo se marca el FINAL; el principio se asume en el segundo 0.
+- **La duración es el cimiento de todo esto.** Antes sólo se guardaba si el NAVEGADOR podía leerla al
+  subir el archivo (con MKV casi nunca), y sin duración `percent` queda en null y el título **no sale
+  nunca** de "Continuar viendo". Ahora la escribe `transcoder.js` desde ffprobe y el barrido de marcas
+  rellena la que falte.
+- **Sólo está en la web.** Las apps de móvil y TV siguen con el comportamiento antiguo (pantalla final
+  al terminar el archivo); llevarlo allí es la siguiente entrega.
+
+### Panel de administración: paginado y progreso volátil
+- `GET /api/admin/library` está **paginado** (`page`, `pageSize` ≤ 50, `type`, `q`, `adult`). No volver
+  a cargar el catálogo entero de golpe en `Admin.jsx` (1563 líneas, el archivo más grande del repo).
+- `GET /api/admin/transcode-progress` devuelve un mapa **en memoria** `{ 'movie-8': 42 }` que el panel
+  sondea. Se pierde al reiniciar: el trabajo se reencola y continúa, pero la barra vuelve a 0.
+- `library?adult=true` exige `canAccessAdult` **aunque seas admin** — misma regla que el catálogo.
+
 ## Base de datos
 
 Tres tablas: `users`, `media` (películas **y** series; `type='series'` deja `video_path NULL` y sus
@@ -181,9 +240,13 @@ videos viven en `episodes`), `episodes`, más `watch_progress`. El progreso usa 
 parciales** (`episode_id IS NULL` vs `NOT NULL`) para que el mismo `ON CONFLICT` sirva a películas y
 capítulos.
 
-Al añadir una columna: crear un `database/migration_*.sql` idempotente (`ADD COLUMN IF NOT EXISTS`) y
-además reflejarlo en `schema.sql` (instalación desde cero). Nunca ejecutar `schema.sql` sobre una BD
-con datos.
+Al añadir una columna hay que tocar **dos** archivos: el `database/migration_*.sql` idempotente
+(`ADD COLUMN IF NOT EXISTS`) y además `schema.sql` (instalación desde cero). El segundo paso es el que
+se olvida, y el fallo no aparece hasta que alguien instala de cero: ya pasó con
+`coming_soon`/`release_date`, que vivieron meses sólo en su migración — una instalación nueva
+rechazaba cualquier "Próximamente" por el `chk_video_path` estricto. Corregido: **hoy `schema.sql`
+está al día** (columnas E índices, incluidos los GIN/trigram del buscador). Mantenerlo así.
+Nunca ejecutar `schema.sql` sobre una BD con datos.
 
 ## Convenciones de frontend
 
@@ -257,7 +320,9 @@ Dominio actual **`vod.cisne.com.pe`**. Nginx (proxy a Node :4000) + PM2 (`vod-ba
 se sirve estático desde `frontend/dist`. Detalle completo en [DEPLOY.md](DEPLOY.md).
 
 1. **`app.set('trust proxy', 1)`** en `index.js` — sin esto express-rate-limit lanza errores async que
-   tumban el proceso (502 al subir) y las cookies `secure` no se envían (401).
+   tumban el proceso (502 al subir) y las cookies `secure` no se envían (401). Hacen falta **las dos
+   piezas**: `trust proxy` sin `COOKIE_SECURE=true` en `backend/.env` deja la cookie sin `Secure`, y
+   `COOKIE_SECURE=true` sin `trust proxy` impide que Express detecte el HTTPS (`X-Forwarded-Proto`).
 2. **SELinux en los discos de media** — el backend ESCRIBE en `<disco>/movies|series|images|hls`; hay
    que etiquetarlas con `httpd_sys_rw_content_t` + `restorecon` o la subida se corta a mitad
    (502 "upstream prematurely closed"). **Repetir al añadir un disco nuevo.** Ver DEPLOY.md →
@@ -265,13 +330,23 @@ se sirve estático desde `frontend/dist`. Detalle completo en [DEPLOY.md](DEPLOY
 3. **Subidas grandes** — `client_max_body_size`, `proxy_request_buffering off` y timeouts largos en el
    bloque **HTTPS (443)** de Nginx; en Node, `requestTimeout/timeout/headersTimeout = 0` (index.js) y
    `timeout: 0` en el proxy de Vite para dev.
-4. **Backup** — Admin → pestaña Backup genera un `.tar.gz` (pg_dump + imágenes) y restaura; requiere
-   `pg_dump`/`psql`/`tar` en el servidor.
+4. **Backup** — Admin → pestaña Backup genera un `.tar.gz` con `pg_dump --clean --if-exists` + las
+   imágenes de **todos** los discos. **Los videos NO se incluyen** (demasiado grandes; se respaldan
+   aparte). `POST /api/admin/restore` es **DESTRUCTIVO** (el dump lleva `--clean`) y devuelve las
+   imágenes **sólo al disco por defecto** — da igual, porque los `express.static` las encuentran en
+   cualquiera. Requiere `pg_dump`/`psql`/`tar` en el PATH del proceso del backend.
 
 Las credenciales reales (BD, JWT, admin seed) viven en `backend/.env`, nunca en git.
 
 ## Flujo de trabajo
 
 - Verificar con `node --check` (backend) y `npm run build` (frontend) antes de dar algo por bueno.
+  Mobile no tiene red de seguridad estática: ahí el cambio se prueba en Metro o en el aparato.
+- **En esta máquina (`C:\DESARROLLOS\streaming`) no hay `node`, `npm`, `psql` ni `adb` en el PATH**
+  (los `node_modules` sí están, copiados). Mientras siga así, un cambio **no se puede verificar en
+  local**: hay que decirlo claramente en vez de dar por bueno algo sin comprobar.
+- **`mobile/README.md` está obsoleto**: da por pendientes cosas que ya existen (+18, descargas
+  offline, APK sin Expo Go) y no menciona la app de TV. `README.md` (raíz), este archivo y
+  [DEPLOY.md](DEPLOY.md) sí están al día; aquel, no.
 - El usuario suele hacer el commit/push él mismo y desplegar con `./deploy.sh` (+ migración a mano
   si la hubiera).

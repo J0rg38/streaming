@@ -112,6 +112,20 @@ export const setFeatured       = (id, featured) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ featured }),
   });
+// --- Marcas de reproducción (inicio de créditos / cabecera) ----------------
+//  Las guarda un administrador con un clic desde el propio reproductor.
+export const setMovieMarks   = (id, marks) =>
+  apiFetch(`${BASE}/admin/media/${id}/marks`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(marks),
+  });
+export const setEpisodeMarks = (id, marks) =>
+  apiFetch(`${BASE}/admin/episodes/${id}/marks`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(marks),
+  });
 // Edición de datos de un título (multipart: incluye poster/banner opcionales).
 export const updateMediaDetails = (id, formData) =>
   apiFetch(`${BASE}/admin/media/${id}`, { method: 'PATCH', body: formData });

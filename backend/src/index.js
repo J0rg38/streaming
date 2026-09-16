@@ -16,6 +16,7 @@ import authRouter     from './routes/auth.js';
 import { requireAuth, requireAdmin } from './middleware/auth.js';
 import { seedAdmin } from './seedAdmin.js';
 import { resumePendingTranscodes, backfillThumbnails } from './transcoder.js';
+import { scheduleMarksScan } from './marks.js';
 import { DISKS, ensureDiskDirs } from './storage.js';
 
 const app = express();
@@ -121,4 +122,9 @@ seedAdmin()
     resumePendingTranscodes()
       .then(() => backfillThumbnails())   // genera miniaturas faltantes
       .catch((e) => console.error('[transcoder] resume:', e));
+
+    // Detecta el inicio de los créditos de lo que aún no tenga marca. Va por
+    // detrás de la transcodificación (espera a que la cola esté libre), así que
+    // arrancarlo aquí no compite con una subida en curso.
+    scheduleMarksScan(30_000);
   });

@@ -52,7 +52,8 @@ export default function MovieDetail() {
   }
 
   const p = movie.progress;
-  const started = p && p.stopped_at > 0 && (p.percent === null || p.percent < 95);
+  const watched = p?.watched ?? (p?.percent !== null && p?.percent >= 95);
+  const started = p && p.stopped_at > 0 && !watched;
   const label = progressLabel(p, movie.duration);
 
   return (
@@ -113,7 +114,7 @@ export default function MovieDetail() {
                   <div className="h-full bg-brand" style={{ width: `${p.percent}%` }} />
                 </div>
                 <p className="mt-1 text-xs text-gray-400">
-                  {p.percent >= 95 ? 'Visto' : label}
+                  {watched ? 'Visto' : label}
                 </p>
               </div>
             )}

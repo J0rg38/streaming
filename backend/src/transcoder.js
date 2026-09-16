@@ -212,6 +212,15 @@ async function processItem(item) {
 
     const { width, height, duration } = await probeVideo(item.videoPath);
 
+    // La duración que mide ffprobe MANDA sobre la que llegó del formulario: la
+    // del formulario la calcula el navegador al elegir el archivo y con MKV
+    // normalmente no puede, así que llega vacía. Y sin duración el título no
+    // sale nunca de "Continuar viendo" (percent queda en null).
+    if (duration) {
+      await query(`UPDATE ${table} SET duration = $1 WHERE id = $2`,
+        [Math.round(duration), item.id]).catch(() => {});
+    }
+
     // Elegimos renditions que NO superen la resolución de origen (sin upscaling).
     let chosen = RENDITIONS.filter((r) => r.height <= height);
     if (chosen.length === 0) chosen = [RENDITIONS[0]]; // fuentes muy pequeñas
@@ -269,6 +278,12 @@ async function drain() {
     await processItem(item);
   }
   working = false;
+}
+
+// ¿Hay transcodificación en marcha o pendiente? Lo consulta el barrido de
+// marcas (marks.js) para no robarle CPU: transcodificar tiene prioridad.
+export function isTranscodeBusy() {
+  return working || queue.length > 0;
 }
 
 // Encola un item para transcodificar (evita duplicados en cola).

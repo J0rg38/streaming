@@ -20,6 +20,7 @@ import path from 'path';
 import { spawn } from 'child_process';
 import { query } from '../db.js';
 import { enqueueTranscode, removeHls, getTranscodeProgress } from '../transcoder.js';
+import { scheduleMarksScan } from '../marks.js';
 import { getDisk, listDisksUsage, DISKS, DEFAULT_DISK, diskForPath, isInsideAnyDisk } from '../storage.js';
 import { canAccessAdult } from '../middleware/auth.js';
 
@@ -154,6 +155,7 @@ router.post(
       // Encolamos la transcodificación a HLS (en segundo plano). El MP4 original
       // ya sirve como respaldo progresivo mientras tanto.
       enqueueTranscode({ kind: 'movie', id: rows[0].id, videoPath: videoFile.path });
+      scheduleMarksScan();   // y, cuando la cola quede libre, dónde empiezan los créditos
 
       res.status(201).json(rows[0]);
     } catch (err) {
@@ -233,6 +235,7 @@ router.post('/upcoming/:id/video', movieUpload.single('video'), async (req, res)
       [videoFile.path, duration ? Math.round(Number(duration)) : null, id]
     );
     enqueueTranscode({ kind: 'movie', id, videoPath: videoFile.path });
+    scheduleMarksScan();
     res.json({ ok: true });
   } catch (err) {
     console.error('[POST /api/admin/upcoming/:id/video]', err);
@@ -324,6 +327,7 @@ router.post('/series/:id/episodes', episodeUpload.single('video'), async (req, r
 
     // Encolamos la transcodificación a HLS del capítulo (en segundo plano).
     enqueueTranscode({ kind: 'episode', id: rows[0].id, videoPath: videoFile.path });
+    scheduleMarksScan();
 
     res.status(201).json(rows[0]);
   } catch (err) {
@@ -483,6 +487,87 @@ router.patch('/media/:id/featured', async (req, res) => {
   } catch (err) {
     console.error('[PATCH /api/admin/media/:id/featured]', err);
     res.status(500).json({ error: 'Error al actualizar destacado' });
+  }
+});
+
+// ===========================================================================
+//  Marcas de reproducción (inicio de créditos / cabecera de serie).
+//  Las pone un administrador con un clic DESDE EL REPRODUCTOR, que es lo único
+//  viable con una biblioteca grande: se corrigen sobre la marcha, viendo.
+//  Quedan como 'manual', y el barrido automático nunca las pisa.
+// ===========================================================================
+
+// Segundo válido, o null para borrar la marca. Rechaza texto y negativos.
+function markSeconds(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Math.round(Number(value));
+  return Number.isFinite(n) && n >= 0 ? n : undefined;   // undefined = inválido
+}
+
+// --- PATCH /api/admin/media/:id/marks — película: { credits_start } --------
+router.patch('/media/:id/marks', async (req, res) => {
+  const id = Number(req.params.id);
+  const creditsStart = markSeconds(req.body?.credits_start);
+  if (creditsStart === undefined) return res.status(400).json({ error: 'credits_start no válido' });
+
+  try {
+    const { rows } = await query(
+      `UPDATE media SET credits_start = $1, marks_source = 'manual'
+        WHERE id = $2 RETURNING id, credits_start, duration`,
+      [creditsStart, id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'No encontrado' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('[PATCH /api/admin/media/:id/marks]', err);
+    res.status(500).json({ error: 'Error al guardar la marca' });
+  }
+});
+
+// --- PATCH /api/admin/episodes/:id/marks ----------------------------------
+//  { credits_start, intro_start, intro_end, apply_season }
+//  apply_season copia la CABECERA (no los créditos, que varían) al resto de
+//  capítulos de la misma temporada: la sintonía empieza siempre en el mismo
+//  punto, así que una marca sirve para los doce capítulos.
+router.patch('/episodes/:id/marks', async (req, res) => {
+  const id = Number(req.params.id);
+  const fields = {
+    credits_start: markSeconds(req.body?.credits_start),
+    intro_start: markSeconds(req.body?.intro_start),
+    intro_end: markSeconds(req.body?.intro_end),
+  };
+  if (Object.values(fields).some((v) => v === undefined)) {
+    return res.status(400).json({ error: 'Marca no válida' });
+  }
+  // Sólo se tocan los campos que vengan en el cuerpo (el resto se conserva).
+  const present = Object.keys(fields).filter((k) => k in (req.body || {}));
+  if (present.length === 0) return res.status(400).json({ error: 'Nada que guardar' });
+
+  try {
+    const sets = present.map((k, i) => `${k} = $${i + 1}`);
+    const params = present.map((k) => fields[k]);
+    params.push(id);
+    const { rows } = await query(
+      `UPDATE episodes SET ${sets.join(', ')}, marks_source = 'manual'
+        WHERE id = $${params.length}
+        RETURNING id, media_id, season_number, credits_start, intro_start, intro_end`,
+      params
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Capítulo no encontrado' });
+
+    let applied = 0;
+    if (req.body?.apply_season && (present.includes('intro_start') || present.includes('intro_end'))) {
+      const { rowCount } = await query(
+        `UPDATE episodes SET intro_start = $1, intro_end = $2, marks_source = 'manual'
+          WHERE media_id = $3 AND season_number = $4 AND id <> $5`,
+        [rows[0].intro_start, rows[0].intro_end, rows[0].media_id, rows[0].season_number, id]
+      );
+      applied = rowCount || 0;
+    }
+    res.json({ ...rows[0], applied_to_season: applied });
+  } catch (err) {
+    console.error('[PATCH /api/admin/episodes/:id/marks]', err);
+    res.status(500).json({ error: 'Error al guardar la marca' });
   }
 });
 

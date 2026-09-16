@@ -8,25 +8,42 @@
 //    (visibilitychange), y lo indica; se reanuda al volver. Así no salta de
 //    título mientras no estás mirando.
 //
+//  Se muestra SOBRE el reproductor mientras el vídeo, ya encogido en la esquina
+//  superior derecha, sigue reproduciendo los créditos. Por eso el contenido se
+//  apoya abajo a la izquierda: no puede taparlo.
+//
 //  Props:
 //    - nextItem       : { title, subtitle, meta, poster_url, banner_url, path } | null
 //    - recommendations: array de títulos (tarjetas).
 //    - onPlayNext(path), onReplay(), onHome(), seconds (por defecto 10).
+//    - onResume()     : volver a pantalla completa ("Seguir viendo"); null si ya acabó.
+//    - delay          : segundos de cortesía antes de arrancar la cuenta atrás.
 // ----------------------------------------------------------------------------
 import { useEffect, useRef, useState } from 'react';
-import { Play, RotateCcw, Home, X, PauseCircle } from 'lucide-react';
+import { Play, RotateCcw, Home, X, PauseCircle, Maximize2 } from 'lucide-react';
 import MediaCard from './MediaCard.jsx';
 
 export default function EndScreen({
-  nextItem, recommendations = [], onPlayNext, onReplay, onHome, seconds = 10,
+  nextItem, recommendations = [], onPlayNext, onReplay, onHome, onResume = null,
+  seconds = 10, delay = 0,
 }) {
   const [remaining, setRemaining] = useState(seconds);
   const [cancelled, setCancelled] = useState(false); // el usuario detuvo el contador
   const [hidden, setHidden] = useState(false);       // pestaña en segundo plano
+  const [waiting, setWaiting] = useState(delay > 0); // cortesía antes de contar
   const timerRef = useRef(null);
 
+  // Margen de cortesía: las recomendaciones aparecen al empezar los créditos,
+  // pero la cuenta atrás no arranca hasta unos segundos después, para no
+  // atosigar a quien quiera quedarse mirando (o leer los nombres).
+  useEffect(() => {
+    if (delay <= 0) { setWaiting(false); return; }
+    const t = setTimeout(() => setWaiting(false), delay * 1000);
+    return () => clearTimeout(t);
+  }, [delay]);
+
   // El contador corre sólo si hay "siguiente", no se canceló y la pestaña está visible.
-  const counting = Boolean(nextItem) && !cancelled && !hidden;
+  const counting = Boolean(nextItem) && !cancelled && !hidden && !waiting;
 
   // Pausa/reanuda según la visibilidad de la pestaña (detalle único).
   useEffect(() => {
@@ -58,7 +75,7 @@ export default function EndScreen({
   const backdrop = nextItem?.banner_url || nextItem?.poster_url;
 
   return (
-    <div className="absolute inset-0 z-40 overflow-hidden">
+    <div className="absolute inset-0 z-30 overflow-hidden">
       {/* -------- Fondo cinematográfico -------- */}
       {backdrop && (
         <img
@@ -74,7 +91,7 @@ export default function EndScreen({
       <style>{`@keyframes endzoom{from{transform:scale(1.15)}to{transform:scale(1.02)}}`}</style>
 
       {/* -------- Contenido -------- */}
-      <div className="relative z-10 flex h-full flex-col justify-center gap-8 overflow-y-auto px-6 py-10 md:px-16">
+      <div className="relative z-10 flex h-full flex-col justify-end gap-6 overflow-y-auto px-6 pb-10 pt-6 md:px-14">
         {nextItem ? (
           <div className="max-w-2xl">
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-brand">
@@ -107,7 +124,9 @@ export default function EndScreen({
 
               <div className="flex flex-col gap-1">
                 <span className="text-lg font-semibold">
-                  {counting ? `Reproduciendo en ${remaining}s` : cancelled ? 'Reproducción automática pausada' : ''}
+                  {counting ? `Reproduciendo en ${remaining}s`
+                    : cancelled ? 'Reproducción automática pausada'
+                      : waiting ? 'A continuación' : ''}
                 </span>
                 {hidden && !cancelled && (
                   <span className="flex items-center gap-1 text-sm text-gray-400">
@@ -119,6 +138,12 @@ export default function EndScreen({
                     <button onClick={() => setCancelled(true)}
                       className="flex items-center gap-1 rounded bg-white/15 px-4 py-1.5 text-sm font-medium hover:bg-white/25">
                       <X size={15} /> Cancelar
+                    </button>
+                  )}
+                  {onResume && (
+                    <button onClick={onResume}
+                      className="flex items-center gap-1 rounded bg-white/15 px-4 py-1.5 text-sm font-medium hover:bg-white/25">
+                      <Maximize2 size={15} /> Seguir viendo
                     </button>
                   )}
                   <button onClick={onReplay}
@@ -138,7 +163,12 @@ export default function EndScreen({
           <div className="max-w-2xl">
             <h2 className="text-4xl font-extrabold">Has terminado</h2>
             <div className="mt-5 flex flex-wrap gap-3">
-              <button onClick={onReplay} className="flex items-center gap-2 rounded bg-white px-6 py-2.5 font-semibold text-black hover:bg-gray-200">
+              {onResume && (
+                <button onClick={onResume} className="flex items-center gap-2 rounded bg-white px-6 py-2.5 font-semibold text-black hover:bg-gray-200">
+                  <Maximize2 size={18} /> Seguir viendo
+                </button>
+              )}
+              <button onClick={onReplay} className="flex items-center gap-2 rounded bg-white/15 px-5 py-2.5 font-semibold hover:bg-white/25">
                 <RotateCcw size={18} /> Ver de nuevo
               </button>
               <button onClick={onHome} className="flex items-center gap-2 rounded bg-white/15 px-5 py-2.5 font-semibold hover:bg-white/25">

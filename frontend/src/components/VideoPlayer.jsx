@@ -7,6 +7,15 @@
 //    - thumbnailsUrl : WebVTT de miniaturas para el preview de la barra (o null).
 //    - mediaId, episodeId, title, restart : identificación / reanudar.
 //    - nextItem, recommendations, onNavigate, onBack : pantalla de fin / navegación.
+//    - creditsAt     : segundo en que empiezan los créditos (o null).
+//    - introStart/introEnd : cabecera de la serie, para el botón "Saltar intro".
+//    - canMark, onSaveMark : marcado manual de esos puntos (sólo administradores).
+//
+//  FIN DE LA REPRODUCCIÓN ("post-play"). Al llegar a los créditos no se para
+//  nada: el título se da por VISTO, el vídeo se encoge a una esquina y sigue
+//  sonando, y aparecen las recomendaciones. Si la marca de créditos estuviera
+//  mal, el botón "Seguir viendo" devuelve el vídeo a pantalla completa, así que
+//  equivocarse no le cuesta nada al espectador.
 //
 //  Visibilidad de controles: patrón clásico y fiable — se muestran al mover el
 //  ratón y se ocultan tras 3s de inactividad (salvo pausa/carga o cursor sobre
@@ -64,6 +73,7 @@ const isFsElement = () => document.fullscreenElement || document.webkitFullscree
 export default function VideoPlayer({
   hlsUrl, progressiveUrl, thumbnailsUrl, mediaId, episodeId = null, title, restart = false,
   nextItem = null, recommendations = [], onNavigate, onBack, homePath = '/',
+  creditsAt = null, introStart = null, introEnd = null, canMark = false, onSaveMark,
 }) {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
@@ -94,7 +104,10 @@ export default function VideoPlayer({
   const [spriteUrl, setSpriteUrl] = useState(null);
   const [preview, setPreview] = useState({ visible: false, x: 0, time: 0 });
   const [skipHint, setSkipHint] = useState(null);
-  const [showEndScreen, setShowEndScreen] = useState(false);
+  const [postPlay, setPostPlay] = useState(false);
+  const [markMsg, setMarkMsg] = useState(null);   // aviso tras marcar (admin)
+  const postPlayRef = useRef(false);   // ya se entró en post-play (no repetir)
+  const creditsDoneRef = useRef(false); // el usuario pidió "Seguir viendo"
 
   const setBuf = (v) => { bufferingRef.current = v; setBuffering(v); };
 
@@ -134,7 +147,8 @@ export default function VideoPlayer({
     if (!v) return;
     let cancelled = false;
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
-    setLevels([]); setSelectedLevel(-1); setShowEndScreen(false); setBuf(true);
+    setLevels([]); setSelectedLevel(-1); setPostPlay(false); setBuf(true);
+    postPlayRef.current = false; creditsDoneRef.current = false;
     const tryPlay = () => v.play().catch(() => {});
 
     (async () => {
@@ -192,6 +206,30 @@ export default function VideoPlayer({
     return () => { clearInterval(id); window.removeEventListener('beforeunload', onUnload); persist(); };
   }, [persist]);
 
+  // --- Fin de la historia: "post-play" ---------------------------------------
+  //  Se entra al llegar a los créditos (o al acabar el vídeo, si no hay marca).
+  //  Aquí es donde el título se da por VISTO: guardamos el progreso al final,
+  //  sin esperar al último segundo. Nadie se queda a ver los créditos, y exigir
+  //  ese último segundo dejaba las películas atascadas en "Continuar viendo".
+  const enterPostPlay = useCallback(() => {
+    if (postPlayRef.current) return;
+    postPlayRef.current = true;
+    const v = videoRef.current;
+    const total = Math.floor(v?.duration || 0);
+    if (mediaId && total) saveProgress(mediaId, episodeId, total).catch(() => {});
+    setPostPlay(true);
+  }, [mediaId, episodeId]);
+
+  // "Seguir viendo": devuelve el vídeo a pantalla completa. El título se queda
+  // marcado como visto (ya lo has terminado) y no se vuelve a interrumpir por
+  // los créditos; sólo reaparecerá el final cuando el archivo acabe de verdad.
+  const handleResume = useCallback(() => {
+    creditsDoneRef.current = true;
+    postPlayRef.current = false;
+    setPostPlay(false);
+    videoRef.current?.play().catch(() => {});
+  }, []);
+
   // --- Miniaturas ------------------------------------------------------------
   useEffect(() => {
     setCues([]); setSpriteUrl(null);
@@ -223,6 +261,8 @@ export default function VideoPlayer({
   const onTimeUpdate = () => {
     const v = videoRef.current; if (!v) return;
     setCurrent(v.currentTime || 0);
+    // ¿Empezaron los créditos? (salvo que el espectador haya pedido seguir viendo)
+    if (!creditsDoneRef.current && creditsAt && (v.currentTime || 0) >= creditsAt) enterPostPlay();
     try { const b = v.buffered; for (let i = 0; i < b.length; i++) if (b.start(i) <= v.currentTime && v.currentTime <= b.end(i)) { setBufferedEnd(b.end(i)); break; } } catch { /* noop */ }
   };
   const onLoadedMeta = () => setDuration(videoRef.current?.duration || 0);
@@ -245,8 +285,34 @@ export default function VideoPlayer({
     if (!isFsElement()) (el?.requestFullscreen || el?.webkitRequestFullscreen)?.call(el);
     else (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
   };
-  const handleEnded = () => { persist(); setShowEndScreen(true); };
-  const handleReplay = () => { const v = videoRef.current; if (v) { v.currentTime = 0; v.play(); } setShowEndScreen(false); };
+  const handleEnded = () => { persist(); enterPostPlay(); };
+  const handleReplay = () => {
+    const v = videoRef.current;
+    if (v) { v.currentTime = 0; v.play().catch(() => {}); }
+    postPlayRef.current = false; creditsDoneRef.current = false;
+    setPostPlay(false);
+  };
+
+  // --- Marcado manual (administradores) --------------------------------------
+  //  Un clic en el segundo exacto mientras se ve. Es la forma realista de tener
+  //  marcas buenas en una biblioteca grande: se corrigen sobre la marcha.
+  const mark = async (kind, applySeason = false) => {
+    const v = videoRef.current;
+    if (!v || !onSaveMark) return;
+    const secs = Math.floor(v.currentTime || 0);
+    try {
+      await onSaveMark(kind, secs, { applySeason });
+      setMarkMsg(
+        kind === 'credits' ? `Créditos marcados en ${fmt(secs)}`
+          : applySeason ? `Cabecera marcada en ${fmt(secs)} (toda la temporada)`
+            : `Cabecera marcada en ${fmt(secs)}`
+      );
+    } catch {
+      setMarkMsg('No se pudo guardar la marca');
+    }
+    setTimeout(() => setMarkMsg(null), 2600);
+    bumpControls();
+  };
 
   // --- Teclado ---------------------------------------------------------------
   useEffect(() => {
@@ -275,6 +341,16 @@ export default function VideoPlayer({
     ? (cues.find((c) => preview.time >= c.start && preview.time < c.end) || cues[cues.length - 1]) : null;
   const controlsCls = `transition-opacity duration-300 ${controls ? 'opacity-100' : 'pointer-events-none opacity-0'}`;
 
+  // Cuenta atrás del siguiente título: arranca 20 s DESPUÉS de aparecer las
+  // recomendaciones. Si los créditos son tan cortos que no daría tiempo a
+  // terminarla antes de que acabe el archivo, se adelanta lo necesario.
+  const creditsTail = creditsAt && duration ? Math.max(0, duration - creditsAt) : 0;
+  const autoplayDelay = creditsTail ? Math.max(0, Math.min(20, creditsTail - 10)) : 0;
+
+  // "Saltar intro": sólo mientras dura la cabecera marcada del capítulo.
+  const showSkipIntro = !postPlay && introEnd != null
+    && current >= (introStart || 0) && current < introEnd;
+
   return (
     <div
       ref={containerRef}
@@ -287,24 +363,35 @@ export default function VideoPlayer({
       {/* Video (object-contain: correcto en cualquier relación de aspecto).
           Mantiene el overlay de hardware para una reproducción fluida; los
           controles se pintan por encima gracias a la clase .vp-layer (capa de
-          composición propia), no desactivando el overlay del video. */}
-      <video
-        ref={videoRef}
-        className="h-full w-full object-contain"
-        onClick={togglePlay}
-        onTimeUpdate={onTimeUpdate}
-        onLoadedMetadata={onLoadedMeta}
-        onPlay={() => { setPlaying(true); ensureAudioBoost(); audioCtxRef.current?.resume?.(); }}
-        onPause={() => setPlaying(false)}
-        onEnded={handleEnded}
-        onWaiting={() => setBuf(true)}
-        onStalled={() => setBuf(true)}
-        onSeeking={() => setBuf(true)}
-        onCanPlay={() => setBuf(false)}
-        onPlaying={() => setBuf(false)}
-        onSeeked={() => setBuf(false)}
-        autoPlay
-      />
+          composición propia), no desactivando el overlay del video.
+
+          El encogido del post-play se aplica al CONTENEDOR, nunca al <video>:
+          tocar el propio elemento (border-radius, isolation…) le quita el
+          overlay de hardware y se pierden fotogramas. */}
+      <div
+        className={`absolute inset-0 transition-transform duration-700 ease-out ${postPlay ? 'z-40' : ''}`}
+        style={postPlay
+          ? { transform: 'translate(-3%, 5%) scale(0.40)', transformOrigin: '100% 0' }
+          : undefined}
+      >
+        <video
+          ref={videoRef}
+          className="h-full w-full object-contain"
+          onClick={togglePlay}
+          onTimeUpdate={onTimeUpdate}
+          onLoadedMetadata={onLoadedMeta}
+          onPlay={() => { setPlaying(true); ensureAudioBoost(); audioCtxRef.current?.resume?.(); }}
+          onPause={() => setPlaying(false)}
+          onEnded={handleEnded}
+          onWaiting={() => setBuf(true)}
+          onStalled={() => setBuf(true)}
+          onSeeking={() => setBuf(true)}
+          onCanPlay={() => setBuf(false)}
+          onPlaying={() => setBuf(false)}
+          onSeeked={() => setBuf(false)}
+          autoPlay
+        />
+      </div>
 
       {/* Capa para cerrar el menú de ajustes al hacer clic fuera (sin pausar).
           Va justo sobre el video pero debajo de los controles/menú. */}
@@ -313,7 +400,7 @@ export default function VideoPlayer({
       )}
 
       {/* Spinner de carga */}
-      {buffering && !showEndScreen && (
+      {buffering && !postPlay && (
         <div className="vp-layer pointer-events-none absolute inset-0 grid place-items-center">
           <Loader2 size={56} className="animate-spin text-white/90 drop-shadow-lg" />
         </div>
@@ -333,7 +420,7 @@ export default function VideoPlayer({
       )}
 
       {/* Controles centrales (estilo MAX): atrasar · play/pausa · adelantar */}
-      {!buffering && !showEndScreen && (
+      {!buffering && !postPlay && (
         <div className={`vp-layer pointer-events-none absolute inset-0 flex items-center justify-center gap-10 sm:gap-16 ${controlsCls}`}>
           <button onClick={() => skip(-10)}
             className="pointer-events-auto grid h-14 w-14 place-items-center rounded-full text-white/90 transition hover:scale-110 hover:bg-white/10 hover:text-white sm:h-16 sm:w-16"
@@ -353,8 +440,8 @@ export default function VideoPlayer({
         </div>
       )}
 
-      {/* Barra superior */}
-      <div className={`vp-layer absolute left-0 top-0 w-full bg-gradient-to-b from-black/80 to-transparent p-4 ${controlsCls}`}>
+      {/* Barra superior (se retira durante el post-play) */}
+      <div className={`vp-layer absolute left-0 top-0 w-full bg-gradient-to-b from-black/80 to-transparent p-4 ${controlsCls} ${postPlay ? 'hidden' : ''}`}>
         <div className="flex items-center gap-3">
           {onBack && (
             <button onClick={onBack} className="flex flex-shrink-0 items-center gap-1 rounded bg-black/40 px-3 py-1.5 text-sm text-white hover:bg-black/70">
@@ -362,12 +449,38 @@ export default function VideoPlayer({
             </button>
           )}
           <h2 className="min-w-0 truncate text-lg font-semibold text-white drop-shadow">{title}</h2>
+
+          {/* Marcado manual: sólo para administradores. Un clic guarda el
+              segundo actual como inicio de créditos o fin de cabecera. */}
+          {canMark && (
+            <div className="ml-auto flex flex-shrink-0 items-center gap-2">
+              <button onClick={() => mark('credits')}
+                className="rounded bg-black/40 px-3 py-1.5 text-xs text-white hover:bg-black/70"
+                title="Guardar este punto como inicio de los créditos">
+                Marcar créditos
+              </button>
+              {episodeId && (
+                <>
+                  <button onClick={() => mark('intro')}
+                    className="rounded bg-black/40 px-3 py-1.5 text-xs text-white hover:bg-black/70"
+                    title="Guardar este punto como final de la cabecera">
+                    Fin de cabecera
+                  </button>
+                  <button onClick={() => mark('intro', true)}
+                    className="rounded bg-black/40 px-3 py-1.5 text-xs text-white hover:bg-black/70"
+                    title="Guardar el final de la cabecera en TODOS los capítulos de esta temporada">
+                    · y toda la temporada
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
       {/* Barra de controles inferior */}
       <div
-        className={`vp-layer absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/85 via-black/40 to-transparent px-3 pb-3 pt-12 sm:px-4 sm:pb-4 ${controlsCls}`}
+        className={`vp-layer absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/85 via-black/40 to-transparent px-3 pb-3 pt-12 sm:px-4 sm:pb-4 ${controlsCls} ${postPlay ? 'hidden' : ''}`}
         onMouseEnter={() => { overControlsRef.current = true; setControls(true); clearTimeout(hideTimerRef.current); }}
         onMouseLeave={() => { overControlsRef.current = false; bumpControls(); }}
       >
@@ -449,13 +562,33 @@ export default function VideoPlayer({
         </div>
       </div>
 
-      {showEndScreen && (
+      {/* "Saltar intro": aparece sólo mientras suena la cabecera del capítulo. */}
+      {showSkipIntro && (
+        <button
+          onClick={() => { seekTo(introEnd); bumpControls(); }}
+          className="vp-layer absolute bottom-24 right-6 rounded bg-white/90 px-5 py-2.5 text-sm font-semibold text-black shadow-lg transition hover:bg-white sm:bottom-28"
+        >
+          Saltar intro
+        </button>
+      )}
+
+      {/* Confirmación del marcado manual (admin). */}
+      {markMsg && (
+        <div className="vp-layer absolute left-1/2 top-6 -translate-x-1/2 rounded bg-black/80 px-4 py-2 text-sm text-white shadow-lg">
+          {markMsg}
+        </div>
+      )}
+
+      {postPlay && (
         <EndScreen
           nextItem={nextItem}
           recommendations={recommendations}
+          delay={autoplayDelay}
           onPlayNext={(path) => onNavigate?.(path)}
           onReplay={handleReplay}
           onHome={() => onNavigate?.(homePath)}
+          // Mientras quede vídeo por delante se puede volver a pantalla completa.
+          onResume={playing || (duration && current < duration - 1) ? handleResume : null}
         />
       )}
     </div>

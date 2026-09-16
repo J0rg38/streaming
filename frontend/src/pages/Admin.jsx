@@ -8,7 +8,7 @@
 //    4. Capítulo   -> añadir episodios a una serie.
 // ----------------------------------------------------------------------------
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Film, Clapperboard, ListPlus, UploadCloud, ArrowLeft, CheckCircle2,
   Library, Search, Trash2, ChevronDown, ChevronRight, Loader2, LogOut,
@@ -688,11 +688,30 @@ function LibraryManager({ adult = false }) {
   const PAGE_SIZE = 12;
   const [data, setData] = useState({ items: [], total: 0, movieCount: 0, seriesCount: 0 });
   const [loading, setLoading] = useState(true);
-  const [q, setQ] = useState('');
-  const [debouncedQ, setDebouncedQ] = useState('');
-  const [type, setType] = useState('all'); // all | movie | series
+
+  // --- Página, filtro y búsqueda viven en la URL -----------------------------
+  //  Al abrir la ficha de un título y volver atrás, el navegador restaura la
+  //  URL y con ella el sitio EXACTO donde estabas (pestaña, página y filtro).
+  //  Si vivieran en useState se perderían: el panel se vuelve a montar.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const page = Math.max(1, Number(searchParams.get('page')) || 1);
+  const rawType = searchParams.get('type');
+  const type = ['movie', 'series'].includes(rawType) ? rawType : 'all'; // all | movie | series
+  const debouncedQ = searchParams.get('q') || '';   // la URL ES el valor ya "debounced"
+  const [q, setQ] = useState(debouncedQ);           // lo que se está tecleando
   const [view, setView] = useState('list'); // list | grid
-  const [page, setPage] = useState(1);
+
+  // Escribe cambios en la URL conservando el resto de parámetros (p.ej. tab).
+  // Los valores por defecto se borran para no ensuciar la barra de direcciones.
+  const patchParams = (changes, { replace = false } = {}) => {
+    const next = new URLSearchParams(searchParams);
+    for (const [k, v] of Object.entries(changes)) {
+      const isDefault = v == null || v === '' || v === 'all' || (k === 'page' && Number(v) === 1);
+      if (isDefault) next.delete(k); else next.set(k, String(v));
+    }
+    setSearchParams(next, { replace });
+  };
+  const setPage = (p) => patchParams({ page: p });
   const [expanded, setExpanded] = useState(null);
   const [selected, setSelected] = useState(new Set()); // ids de películas seleccionadas
   const [regularize, setRegularize] = useState(null);  // próximo estreno al que subir video
@@ -702,11 +721,18 @@ function LibraryManager({ adult = false }) {
   const [reloadSignal, setReloadSignal] = useState(0);
   const [editId, setEditId] = useState(null);   // id del título en edición
 
-  // Debounce del texto de búsqueda (350ms).
+  // Debounce del texto de búsqueda (350ms): se refleja en la URL con `replace`
+  // para no dejar una entrada de historial por cada tecla.
   useEffect(() => {
-    const t = setTimeout(() => { setDebouncedQ(q.trim()); setPage(1); }, 350);
+    const t = setTimeout(() => {
+      if (q.trim() !== debouncedQ) patchParams({ q: q.trim(), page: 1 }, { replace: true });
+    }, 350);
     return () => clearTimeout(t);
+    /* eslint-disable-next-line */
   }, [q]);
+
+  // Camino inverso: si la URL cambia por fuera (botón atrás), el input la sigue.
+  useEffect(() => { setQ(debouncedQ); }, [debouncedQ]);
 
   const load = () => {
     setLoading(true);
@@ -717,7 +743,7 @@ function LibraryManager({ adult = false }) {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [page, type, debouncedQ, adult]);
 
   // Al cambiar de filtro, volvemos a la página 1.
-  const changeType = (t) => { setType(t); setPage(1); };
+  const changeType = (t) => patchParams({ type: t, page: 1 });
 
   // --- Polling del progreso de transcodificación en tiempo real -----------
   useEffect(() => {
@@ -1018,7 +1044,7 @@ function LibraryManager({ adult = false }) {
       {totalPages > 1 && (
         <div className="flex items-center justify-center gap-3 pt-2">
           <button
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            onClick={() => setPage(Math.max(1, page - 1))}
             disabled={page <= 1}
             className="rounded bg-white/10 px-4 py-1.5 text-sm hover:bg-white/20 disabled:opacity-40"
           >
@@ -1026,7 +1052,7 @@ function LibraryManager({ adult = false }) {
           </button>
           <span className="text-sm text-gray-400">Página {page} de {totalPages}</span>
           <button
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            onClick={() => setPage(Math.min(totalPages, page + 1))}
             disabled={page >= totalPages}
             className="rounded bg-white/10 px-4 py-1.5 text-sm hover:bg-white/20 disabled:opacity-40"
           >
@@ -1432,7 +1458,13 @@ function BackupManager() {
 //  Página principal del panel.
 // ===========================================================================
 export default function Admin() {
-  const [tab, setTab] = useState('library');
+  // La pestaña activa vive en la URL (/admin?tab=library18). Con useState se
+  // perdía al volver atrás desde la ficha de un título: el panel se remonta y
+  // caías siempre en "Biblioteca", aunque vinieras de "Biblioteca +18".
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get('tab') || 'library';
+  // Al cambiar de pestaña se sueltan página/filtro/búsqueda de la anterior.
+  const setTab = (key) => setSearchParams(key === 'library' ? {} : { tab: key });
   const [series, setSeries] = useState([]);
   const { user, canAdult, logout } = useAuth();
   const navigate = useNavigate();
